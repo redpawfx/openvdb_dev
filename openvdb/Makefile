@@ -66,7 +66,7 @@
 #
 
 # The directory into which to install libraries, executables and header files
-INSTALL_DIR := /tmp/OpenVDB
+INSTALL_DIR := ./RELEASE/OpenVDB
 
 # The parent directory of the boost/ header directory
 BOOST_INCL_DIR := $(HT)/include
@@ -86,16 +86,16 @@ TBBMALLOC_LIB := -ltbbmalloc_proxy -ltbbmalloc
 
 # The parent directory of the cppunit/ header directory
 # (leave blank if CppUnit is unavailable)
-CPPUNIT_INCL_DIR := /rel/map/generic-2011.15/sys_include
+CPPUNIT_INCL_DIR := /usr/include 
 # The directory containing libcppunit
-CPPUNIT_LIB_DIR := /rel/depot/third_party_build/cppunit/1.10.2-7/opt-ws5-x86_64-gccWS5_64/lib/
+CPPUNIT_LIB_DIR := /usr/lib64
 CPPUNIT_LIB := -lcppunit
 
 # The directory containing glfw.h
 # (leave blank if GLFW is unavailable)
-GLFW_INCL_DIR := /rel/third_party/glfw/current/include
+GLFW_INCL_DIR := /usr/include
 # The directory containing libglfw
-GLFW_LIB_DIR := /rel/third_party/glfw/current/lib
+GLFW_LIB_DIR := /usr/lib64
 GLFW_LIB := -lglfw
 
 # The Doxygen executable
