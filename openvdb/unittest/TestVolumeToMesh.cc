@@ -33,8 +33,8 @@
 
 #include <openvdb/openvdb.h>
 #include <openvdb/Exceptions.h>
-
 #include <openvdb/tools/VolumeToMesh.h>
+#include <openvdb/tree/LeafManager.h>
 #include <openvdb/util/Util.h>
 
 
@@ -68,11 +68,12 @@ TestVolumeToMesh::testAuxData()
     tree->setValue(openvdb::Coord(0,0,1),  1);
 
 
-    openvdb::tools::internal::LeafCPtrList<openvdb::FloatTree> leafs(*tree);
+
+    openvdb::tree::LeafManager<const openvdb::FloatTree> leafs(*tree);
 
     openvdb::tools::internal::AuxiliaryData<openvdb::FloatTree> init(*tree, leafs, 0.0);
 
-    init.runParallel();
+    init.run();
 
     CPPUNIT_ASSERT(init.auxTree()->activeVoxelCount() == 7);
     CPPUNIT_ASSERT(init.edgeTree()->activeVoxelCount() == 1);
@@ -87,7 +88,7 @@ TestVolumeToMesh::testAuxData()
 
     tree->setValueOff(openvdb::Coord(0,0,1), -1);
 
-    init.runParallel();
+    init.run();
 
     CPPUNIT_ASSERT(init.auxTree()->activeVoxelCount() == 7);
     CPPUNIT_ASSERT(init.edgeTree()->activeVoxelCount() == 1);
