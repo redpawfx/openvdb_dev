@@ -35,6 +35,7 @@
 #include <openvdb/util/Util.h> // for COORD_OFFSETS
 #include <openvdb/math/Operators.h> // for ISGradient
 #include <openvdb/tools/Morphology.h> // for dilateVoxels()
+#include <openvdb/tree/LeafManager.h>
 
 #include <boost/scoped_array.hpp>
 #include <boost/scoped_ptr.hpp>
@@ -222,6 +223,29 @@ public:
     ///                         removes staircase artifacts.
     void setRefGrid(const GridBase::ConstPtr& grid, double secAdaptivity = 0, bool smoothSeams = true);
 
+
+    /// @param mask A boolean grid whose active topology defines the region to mesh.
+    /// @param invertMask Toggle to mesh the complement of the mask.
+    /// @note The mask's tree configuration has to match @c GridT's tree configuration.
+    void setSurfaceMask(const GridBase::ConstPtr& mask, bool invertMask = false);
+
+
+    /// @param grid A scalar grid used as an spatial multiplier for the adaptivity threshold.
+    /// @note The grid's tree configuration has to match @c GridT's tree configuration.
+    void setSpatialAdaptivity(const GridBase::ConstPtr& grid);
+
+
+    /// @param tree A boolean tree whose active topology defines the adaptivity mask.
+    /// @note The tree configuration has to match @c GridT's tree configuration.
+    void setAdaptivityMask(const TreeBase::ConstPtr& tree);
+
+
+    /// @brief Subdivide volume and mesh into disjoint parts
+    /// @param partitions Number of partitions.
+    /// @param activePart Specific partition to mesh, 0 to @c partitions - 1.
+    void partition(unsigned partitions = 1, unsigned activePart = 0);
+
+
 private:
 
     PointList mPoints;
@@ -230,10 +254,114 @@ private:
     size_t mPointListSize, mPolygonPoolListSize;
     double mIsovalue, mPrimAdaptivity, mSecAdaptivity;
 
-    GridBase::ConstPtr mRefGrid;
+    GridBase::ConstPtr mRefGrid, mSurfaceMaskGrid, mAdaptivityGrid;
+    TreeBase::ConstPtr mAdaptivityMaskTree;
+
     TreeBase::Ptr mRefEdgeTree, mRefTopologyMaskTree, mSeamPointTree;
-    bool mSmoothSeams;
+
+    bool mSmoothSeams, mInvertSurfaceMask;
+    unsigned mPartitions, mActivePart;
 };
+
+
+////////////////////////////////////////
+
+
+/// @brief  Given a set of tangent elements, @c points with corresponding @c normals,
+///         this method returns the intersection point of all tangent elements.
+///
+/// @note   Used to extract surfaces with sharp edges and corners from volume data,
+///         see the following paper for details: "Feature Sensitive Surface
+///         Extraction from Volume Data, Kobbelt et al. 2001".
+inline Vec3d findFeaturePoint(
+    const std::vector<Vec3d>& points,
+    const std::vector<Vec3d>& normals)
+{
+    typedef math::Mat3d Mat3d;
+
+    Vec3d avgPos(0.0);
+
+    if (points.empty()) return avgPos;
+
+    for (size_t n = 0, N = points.size(); n < N; ++n) {
+        avgPos += points[n];
+    }
+
+    avgPos /= double(points.size());
+
+    // Unique components of the 3x3 A^TA matrix, where A is
+    // the matrix of normals.
+    double m00=0,m01=0,m02=0,
+           m11=0,m12=0,
+           m22=0;
+
+    // The rhs vector, A^Tb, where b = n dot p
+    Vec3d rhs(0.0);
+
+    for (size_t n = 0, N = points.size(); n < N; ++n) {
+
+        const Vec3d& n_ref = normals[n];
+
+        // A^TA
+        m00 += n_ref[0] * n_ref[0]; // diagonal
+        m11 += n_ref[1] * n_ref[1];
+        m22 += n_ref[2] * n_ref[2];
+
+        m01 += n_ref[0] * n_ref[1]; // Upper-tri
+        m02 += n_ref[0] * n_ref[2];
+        m12 += n_ref[1] * n_ref[2];
+
+        // A^Tb (centered around the origin)
+        rhs += n_ref * n_ref.dot(points[n] - avgPos);
+    }
+
+    Mat3d A(m00,m01,m02,
+            m01,m11,m12, 
+            m02,m12,m22);
+
+    /*
+    // Inverse
+    const double det = A.det();
+    if (det > 0.01) {
+        Mat3d A_inv = A.adjoint();
+        A_inv *= (1.0 / det);
+
+        return avgPos + A_inv * rhs;
+    }
+    */
+
+    // Compute the pseudo inverse
+
+    math::Mat3d eigenVectors;
+    Vec3d eigenValues;
+
+    diagonalizeSymmetricMatrix(A, eigenVectors, eigenValues, 300);
+
+    Mat3d D = Mat3d::identity();
+
+
+    double tolerance = std::max(std::abs(eigenValues[0]), std::abs(eigenValues[1]));
+    tolerance = std::max(tolerance, std::abs(eigenValues[2]));
+    tolerance *= 0.01;
+
+    int clamped = 0;
+    for (int i = 0; i < 3; ++i ) {
+        if (std::abs(eigenValues[i]) < tolerance) {
+            D[i][i] = 0.0;
+            ++clamped;
+        } else {
+            D[i][i] = 1.0 / eigenValues[i];
+        }
+    }
+
+    // Assemble the pseudo inverse and calc. the intersection point
+    if (clamped < 3) {
+        Mat3d pseudoInv = eigenVectors * D *  eigenVectors.transpose();
+        return avgPos + pseudoInv * rhs;
+    }
+
+    return avgPos;
+}
 
 
 ////////////////////////////////////////
@@ -577,7 +705,6 @@ private:
 
 ////////////////////////////////////////
 
-
 template<typename DistTreeT>
 struct ReferenceData
 {
@@ -686,20 +813,25 @@ public:
     typedef typename DistTreeT::ValueType DistValueT;
     typedef typename DistTreeT::template ValueConverter<bool>::Type BoolTreeT;
     typedef typename DistTreeT::template ValueConverter<int>::Type IntTreeT;
+    typedef typename DistTreeT::template ValueConverter<float>::Type FloatTreeT;
+    typedef Grid<FloatTreeT> FloatGridT;
 
     Merge(
         const DistTreeT& distTree,
         LeafPtrList<IntTreeT>& auxLeafs,
         std::vector<size_t>& leafRegionCount,
         const DistValueT iso,
-        const DistValueT adaptivity);
+        const DistValueT adaptivity,
+        const BoolTreeT * pointMask = NULL);
 
     inline Merge(const Merge<DistTreeT>&);
 
     void setRefData(const ReferenceData<DistTreeT>&);
 
-    void runParallel();
-    void runSerial();
+    void setSpatialAdaptivity(
+        const math::Transform& distGridXForm, const FloatGridT& adaptivityField);
+
+    void run(bool threaded = true);
 
     void operator()(const tbb::blocked_range<size_t>&) const;
 
@@ -709,6 +841,10 @@ private:
     std::vector<size_t>& mLeafRegionCount;
     const DistValueT mIsovalue, mAdaptivity;
     const ReferenceData<DistTreeT>* mRefData;
+
+    const math::Transform * mTransform;
+    const FloatGridT * mAdaptivityGrid;
+    const BoolTreeT * mPointMask;
 };
 
 
@@ -718,13 +854,17 @@ Merge<DistTreeT>::Merge(
     LeafPtrList<IntTreeT>& auxLeafs,
     std::vector<size_t>& leafRegionCount,
     const DistValueT iso,
-    const DistValueT adaptivity)
+    const DistValueT adaptivity,
+    const BoolTreeT * pointMask)
     : mDistTree(distTree)
     , mAuxLeafs(auxLeafs)
     , mLeafRegionCount(leafRegionCount)
     , mIsovalue(iso)
     , mAdaptivity(adaptivity)
     , mRefData(NULL)
+    , mTransform(NULL)
+    , mAdaptivityGrid(NULL)
+    , mPointMask(pointMask)
 {
 }
 
@@ -738,24 +878,24 @@ Merge<DistTreeT>::Merge(const Merge<DistTreeT>& rhs)
     , mIsovalue(rhs.mIsovalue)
     , mAdaptivity(rhs.mAdaptivity)
     , mRefData(rhs.mRefData)
+    , mTransform(rhs.mTransform)
+    , mAdaptivityGrid(rhs.mAdaptivityGrid)
+    , mPointMask(rhs.mPointMask)
 {
 }
 
 
 template <class DistTreeT>
 void
-Merge<DistTreeT>::runParallel()
+Merge<DistTreeT>::run(bool threaded)
 {
-    tbb::parallel_for(mAuxLeafs.getRange(), *this);
+    if (threaded) {
+        tbb::parallel_for(mAuxLeafs.getRange(), *this);
+    } else {
+        (*this)(mAuxLeafs.getRange());
+    }
 }
 
-
-template <class DistTreeT>
-void
-Merge<DistTreeT>::runSerial()
-{
-    (*this)(mAuxLeafs.getRange());
-}
 
 template <class DistTreeT>
 void
@@ -763,6 +903,17 @@ Merge<DistTreeT>::setRefData(const ReferenceData<DistTreeT>& refData)
 {
     mRefData = &refData;
 }
+
+
+template <class DistTreeT>
+void
+Merge<DistTreeT>::setSpatialAdaptivity(
+    const math::Transform& distGridXForm, const FloatGridT& adaptivityField)
+{
+    mTransform = &distGridXForm;
+    mAdaptivityGrid = &adaptivityField;
+}
+
 
 template <class DistTreeT>
 void
@@ -772,12 +923,19 @@ Merge<DistTreeT>::operator()(const tbb::blocked_range<size_t>& range) const
     typedef typename BoolTreeT::LeafNodeType BoolLeafT;
     typedef typename IntTreeT::LeafNodeType IntLeafT;
     typedef typename BoolLeafT::template ValueConverter<Vec3T>::Type Vec3LeafT;
+    typedef typename BoolLeafT::template ValueConverter<DistValueT>::Type DistLeafT;
 
     typedef typename IntLeafT::ValueOnIter IntIterT;
     typedef typename BoolLeafT::ValueOnCIter BoolCIterT;
 
     typedef typename tree::ValueAccessor<BoolTreeT> BoolTreeAccessorT;
     typedef typename tree::ValueAccessor<const BoolTreeT> BoolTreeCAccessorT;
+    typedef typename tree::ValueAccessor<const FloatTreeT> FloatTreeCAccessorT;
+
+    boost::scoped_ptr<FloatTreeCAccessorT> adaptivityAcc;
+    if (mAdaptivityGrid) {
+        adaptivityAcc.reset(new FloatTreeCAccessorT(mAdaptivityGrid->tree()));
+    }
 
     boost::scoped_ptr<BoolTreeAccessorT> seamMaskAcc;
     boost::scoped_ptr<BoolTreeCAccessorT> topologyMaskAcc;
@@ -824,6 +982,19 @@ Merge<DistTreeT>::operator()(const tbb::blocked_range<size_t>& range) const
             }
         }
 
+
+        DistLeafT adaptivityLeaf(origin, adaptivity);
+
+        if (mAdaptivityGrid) {
+            for (Index offset = 0; offset < DistLeafT::NUM_VALUES; ++offset) {
+                ijk = adaptivityLeaf.offset2globalCoord(offset);
+                Vec3d xyz = mAdaptivityGrid->transform().worldToIndex(
+                    mTransform->indexToWorld(ijk));
+                DistValueT tmpA = DistValueT(adaptivityAcc->getValue(util::nearestCoord(xyz)));
+                adaptivityLeaf.setValueOnly(offset, tmpA * adaptivity);
+            }
+        }
+
         // Mask off ambiguous voxels
         for (IntIterT it = auxLeaf.beginValueOn(); it; ++it) {
             ijk = it.getCoord();
@@ -834,105 +1005,147 @@ Merge<DistTreeT>::operator()(const tbb::blocked_range<size_t>& range) const
             mask.setActiveState(coord, isAmbiguous(distAcc, ijk, mIsovalue, 1));
         }
 
-       int dim = 2;
-       // Mask off topologically ambiguous 2x2x2 voxel sub-blocks
-       for (ijk[0] = origin[0]; ijk[0] < end[0]; ijk[0] += dim) {
-           for (ijk[1] = origin[1]; ijk[1] < end[1]; ijk[1] += dim) {
-               for (ijk[2] = origin[2]; ijk[2] < end[2]; ijk[2] += dim) {
-                   if (isNonManifold(distAcc, ijk, mIsovalue, dim)) {
-                       mask.setActiveState(ijk, true);
-                   }
-               }
-           }
-       }
+        int dim = 2;
+        // Mask off topologically ambiguous 2x2x2 voxel sub-blocks
+        for (ijk[0] = origin[0]; ijk[0] < end[0]; ijk[0] += dim) {
+            for (ijk[1] = origin[1]; ijk[1] < end[1]; ijk[1] += dim) {
+                for (ijk[2] = origin[2]; ijk[2] < end[2]; ijk[2] += dim) {
+                    if (isNonManifold(distAcc, ijk, mIsovalue, dim)) {
+                        mask.setActiveState(ijk, true);
+                    }
+                }
+            }
+        }
 
-       // Compute the gradient for the remaining voxels
-       gradientBuffer.setValuesOff();
+        // Compute the gradient for the remaining voxels
+        gradientBuffer.setValuesOff();
 
-       for (IntIterT it = auxLeaf.beginValueOn(); it; ++it) {
+        for (IntIterT it = auxLeaf.beginValueOn(); it; ++it) {
 
-           ijk = it.getCoord();
-           coord[0] = ijk[0] - (ijk[0] % dim);
-           coord[1] = ijk[1] - (ijk[1] % dim);
-           coord[2] = ijk[2] - (ijk[2] % dim);
-           if(mask.isValueOn(coord)) continue;
+            ijk = it.getCoord();
+            coord[0] = ijk[0] - (ijk[0] % dim);
+            coord[1] = ijk[1] - (ijk[1] % dim);
+            coord[2] = ijk[2] - (ijk[2] % dim);
+            if(mask.isValueOn(coord)) continue;
 
-           Vec3T norm(math::ISGradient<math::CD_2ND>::result(distAcc, ijk));
-           // Normalize (Vec3's normalize uses isApproxEqual, which uses abs and does more work)
-           DistValueT length = norm.length();
-           if (length > DistValueT(1.0e-7)) {
-               norm *= DistValueT(1.0) / length;
-           }
-           gradientBuffer.setValue(ijk, norm);
-       }
+            Vec3T norm(math::ISGradient<math::CD_2ND>::result(distAcc, ijk));
+            // Normalize (Vec3's normalize uses isApproxEqual, which uses abs and does more work)
+            DistValueT length = norm.length();
+            if (length > DistValueT(1.0e-7)) {
+                norm *= DistValueT(1.0) / length;
+            }
+            gradientBuffer.setValue(ijk, norm);
+        }
 
-       int regionId = 1, next_dim = dim << 1;
+        int regionId = 1, next_dim = dim << 1;
 
-       // Process the first adaptivity level.
-       for (ijk[0] = 0; ijk[0] < LeafDim; ijk[0] += dim) {
-           coord[0] = ijk[0] - (ijk[0] % next_dim);
-           for (ijk[1] = 0; ijk[1] < LeafDim; ijk[1] += dim) {
-               coord[1] = ijk[1] - (ijk[1] % next_dim);
-               for (ijk[2] = 0; ijk[2] < LeafDim; ijk[2] += dim) {
-                   coord[2] = ijk[2] - (ijk[2] % next_dim);
-                   if(mask.isValueOn(ijk) || !isMergable(gradientBuffer, ijk, dim, adaptivity)) {
-                       mask.setActiveState(coord, true);
-                       continue;
-                   }
-                   mergeVoxels(auxLeaf, ijk, dim, regionId++);
-               }
-           }
-       }
-
-
-       // Process remaining adaptivity levels
-       for (dim = 4; dim < LeafDim; dim = dim << 1) {
-           next_dim = dim << 1;
-           coord[0] = ijk[0] - (ijk[0] % next_dim);
-           for (ijk[0] = origin[0]; ijk[0] < end[0]; ijk[0] += dim) {
-               coord[1] = ijk[1] - (ijk[1] % next_dim);
-               for (ijk[1] = origin[1]; ijk[1] < end[1]; ijk[1] += dim) {
-                   coord[2] = ijk[2] - (ijk[2] % next_dim);
-                   for (ijk[2] = origin[2]; ijk[2] < end[2]; ijk[2] += dim) {
-
-                       if (mask.isValueOn(ijk) || isNonManifold(distAcc, ijk, mIsovalue, dim) ||
-                           !isMergable(gradientBuffer, ijk, dim, adaptivity)) {
-                           mask.setActiveState(coord, true);
-                           continue;
-                       }
-                       mergeVoxels(auxLeaf, ijk, dim, regionId++);
-                   }
-               }
-           }
-       }
+        // Process the first adaptivity level.
+        for (ijk[0] = 0; ijk[0] < LeafDim; ijk[0] += dim) {
+            coord[0] = ijk[0] - (ijk[0] % next_dim);
+            for (ijk[1] = 0; ijk[1] < LeafDim; ijk[1] += dim) {
+                coord[1] = ijk[1] - (ijk[1] % next_dim);
+                for (ijk[2] = 0; ijk[2] < LeafDim; ijk[2] += dim) {
+                    coord[2] = ijk[2] - (ijk[2] % next_dim);
+                    adaptivity = adaptivityLeaf.getValue(ijk);
+                    if(mask.isValueOn(ijk) || !isMergable(gradientBuffer, ijk, dim, adaptivity)) {
+                        mask.setActiveState(coord, true);
+                        continue;
+                    }
+                    mergeVoxels(auxLeaf, ijk, dim, regionId++);
+                }
+            }
+        }
 
 
-       if (!(mask.isValueOn(origin) || isNonManifold(distAcc, origin, mIsovalue, LeafDim))
-           && isMergable(gradientBuffer, origin, LeafDim, adaptivity)) {
-           mergeVoxels(auxLeaf, origin, LeafDim, regionId++);
-       }
+        // Process remaining adaptivity levels
+        for (dim = 4; dim < LeafDim; dim = dim << 1) {
+            next_dim = dim << 1;
+            coord[0] = ijk[0] - (ijk[0] % next_dim);
+            for (ijk[0] = origin[0]; ijk[0] < end[0]; ijk[0] += dim) {
+                coord[1] = ijk[1] - (ijk[1] % next_dim);
+                for (ijk[1] = origin[1]; ijk[1] < end[1]; ijk[1] += dim) {
+                    coord[2] = ijk[2] - (ijk[2] % next_dim);
+                    for (ijk[2] = origin[2]; ijk[2] < end[2]; ijk[2] += dim) {
+                        adaptivity = adaptivityLeaf.getValue(ijk);
+                        if (mask.isValueOn(ijk) || isNonManifold(distAcc, ijk, mIsovalue, dim) ||
+                            !isMergable(gradientBuffer, ijk, dim, adaptivity)) {
+                            mask.setActiveState(coord, true);
+                            continue;
+                        }
+                        mergeVoxels(auxLeaf, ijk, dim, regionId++);
+                    }
+                }
+            }
+        }
 
+        adaptivity = adaptivityLeaf.getValue(origin);
+        if (!(mask.isValueOn(origin) || isNonManifold(distAcc, origin, mIsovalue, LeafDim))
+            && isMergable(gradientBuffer, origin, LeafDim, adaptivity)) {
+            mergeVoxels(auxLeaf, origin, LeafDim, regionId++);
+        }
 
-       // Count unique regions
-       size_t numVoxels = 0;
-       IntLeafT tmpLeaf(auxLeaf);
-       for (IntIterT it = tmpLeaf.beginValueOn(); it; ++it) {
-           if(it.getValue() == 0) {
-               it.setValueOff();
-               ++numVoxels;
-           }
-       }
+        if (mPointMask) {
+            const BoolLeafT * ptnMaskLeaf = mPointMask->probeConstLeaf(auxLeaf.getOrigin());
 
-       while (tmpLeaf.onVoxelCount() > 0) {
-           ++numVoxels;
-           IntIterT it = tmpLeaf.beginValueOn();
-           regionId = it.getValue();
-           for (; it; ++it) {
-               if (it.getValue() == regionId) it.setValueOff();
-           }
-       }
+            if (ptnMaskLeaf) { // remove unused regions
 
-       mLeafRegionCount[n] = numVoxels;
+                for (IntIterT it = auxLeaf.beginValueOn(); it; ++it) {
+                    if (it.getValue() == 0 && !ptnMaskLeaf->isValueOn(it.pos())) {
+                        it.setValueOff();
+                    }
+                }
+
+                IntLeafT tmpLeaf(auxLeaf);
+
+                while (tmpLeaf.onVoxelCount() > 0) {
+
+                    IntIterT it = tmpLeaf.beginValueOn();
+                    regionId = it.getValue();
+                    bool removeRegion = true;
+                    for (; it; ++it) {
+                        if (it.getValue() == regionId) {
+                            if (ptnMaskLeaf->isValueOn(it.pos())) {
+                                removeRegion = false;
+                            }
+                            it.setValueOff();
+                        }
+                    }
+
+                    if (removeRegion) {
+                        it = auxLeaf.beginValueOn();
+                        for (; it; ++it) {
+                            if (it.getValue() == regionId) {
+                                it.setValueOff();
+                            }
+                        }
+                    }
+                }
+            } else {
+                mLeafRegionCount[n] = 0;
+                continue;
+            }
+        }
+
+        // Count unique regions
+        size_t numVoxels = 0;
+        IntLeafT tmpLeaf(auxLeaf);
+        for (IntIterT it = tmpLeaf.beginValueOn(); it; ++it) {
+            if(it.getValue() == 0) {
+                it.setValueOff();
+                ++numVoxels;
+            }
+        }
+
+        while (tmpLeaf.onVoxelCount() > 0) {
+            ++numVoxels;
+            IntIterT it = tmpLeaf.beginValueOn();
+            regionId = it.getValue();
+            for (; it; ++it) {
+                if (it.getValue() == regionId) it.setValueOff();
+            }
+        }
+
+        mLeafRegionCount[n] = numVoxels;
     }
 }
 
@@ -972,8 +1185,9 @@ private:
     const openvdb::math::Transform& mTransform;
     const PointList& mPoints;
     const double mIsovalue;
-    const ReferenceData<DistTreeT>* mRefData;
 
+    const ReferenceData<DistTreeT>* mRefData;
+    
     double root(double v0, double v1) const { return (mIsovalue - v0) / (v1 - v0); }
     int calcAvgPoint(DistTreeAccessorT&, const Coord&, openvdb::Vec3d&) const;
 };
@@ -1141,6 +1355,7 @@ PointGen<DistTreeT>::operator()(const tbb::blocked_range<size_t>& range) const
                     ++points;
                 }
             }
+            
 
             if (points > 1) {
                 double w = 1.0 / double(points);
@@ -1653,29 +1868,384 @@ MeshGen<DistTreeT, MeshingOp>::operator()(
 
 ////////////////////////////////////////
 
+// Masking and mesh partitioning
 
-template<class DistTreeT, class AuxDataT = int>
+struct PartOp
+{ 
+
+    PartOp(size_t leafCount, size_t partitions, size_t activePart)
+    {
+        size_t leafSegments = leafCount / partitions;
+        mStart = leafSegments * activePart;
+        mEnd = activePart >= (partitions - 1) ? leafCount : mStart + leafSegments;
+    }
+
+    template <typename LeafNodeType>
+    void operator()(LeafNodeType &leaf, size_t leafIndex) const
+    {
+        if (leafIndex < mStart || leafIndex >= mEnd) leaf.setValuesOff();
+    }
+
+private:
+   size_t mStart, mEnd;
+};
+
+template<typename SrcTreeT>
+class PartGen
+{
+public:
+    typedef tree::LeafManager<const SrcTreeT> LeafManagerT;
+    typedef typename SrcTreeT::template ValueConverter<bool>::Type BoolTreeT;
+    typedef tree::ValueAccessor<BoolTreeT> BoolAccessorT;
+
+    //////////
+
+
+    PartGen(const LeafManagerT& leafs, size_t partitions, size_t activePart);
+
+    void run(bool threaded = true);
+    
+    BoolTreeT&  tree() { return mTree; }
+
+
+    //////////
+
+    PartGen(PartGen&, tbb::split);
+    void operator()(const tbb::blocked_range<size_t>&);
+    void join(PartGen& rhs) { mTree.merge(rhs.mTree); }
+
+private:
+    const LeafManagerT& mLeafManager;
+    BoolTreeT mTree;
+    size_t mStart, mEnd;
+};
+
+template<typename SrcTreeT>
+PartGen<SrcTreeT>::PartGen(const LeafManagerT& leafs, size_t partitions, size_t activePart)
+    : mLeafManager(leafs)
+    , mTree(false)
+{
+    size_t leafCount = leafs.leafCount();
+    size_t leafSegments = leafCount / partitions;
+    mStart = leafSegments * activePart;
+    mEnd = activePart >= (partitions - 1) ? leafCount : mStart + leafSegments;
+}
+
+template<typename SrcTreeT>
+PartGen<SrcTreeT>::PartGen(PartGen& rhs, tbb::split)
+    : mLeafManager(rhs.mLeafManager)
+    , mTree(false)
+    , mStart(rhs.mStart)
+    , mEnd(rhs.mEnd)
+{
+}
+
+
+template<typename SrcTreeT>
+void
+PartGen<SrcTreeT>::run(bool threaded)
+{
+    if (threaded) {
+        tbb::parallel_reduce(mLeafManager.getRange(), *this);
+    } else {
+        (*this)(mLeafManager.getRange());
+    }
+}
+
+
+template<typename SrcTreeT>
+void
+PartGen<SrcTreeT>::operator()(const tbb::blocked_range<size_t>& range)
+{
+    Coord ijk;
+    BoolAccessorT acc(mTree);
+
+    typedef typename BoolTreeT::LeafNodeType BoolLeafT;
+    typename SrcTreeT::LeafNodeType::ValueOnCIter iter;
+
+    for (size_t n = range.begin(); n != range.end(); ++n) {
+        if (n < mStart || n >= mEnd) continue;
+        BoolLeafT* leaf = acc.touchLeaf(mLeafManager.leaf(n).getOrigin());
+        leaf->topologyUnion(mLeafManager.leaf(n));
+    }
+}
+
+
+template<typename SrcTreeT>
+class MaskGen
+{
+public:
+    typedef tree::LeafManager<const SrcTreeT> LeafManagerT;
+    typedef typename SrcTreeT::template ValueConverter<bool>::Type BoolTreeT;
+    typedef tree::ValueAccessor<const SrcTreeT> SrcAccessorT;
+    typedef tree::ValueAccessor<BoolTreeT> BoolAccessorT;
+    typedef Grid<BoolTreeT> BoolGridT;
+
+
+    //////////
+
+
+    MaskGen(const BoolGridT& mask, const LeafManagerT& srcLeafs,
+        const math::Transform& srcXForm, bool invertMask);
+
+    void run(bool threaded = true);
+    
+    BoolTreeT&  tree() { return mTree; }
+
+
+    //////////
+
+    MaskGen(MaskGen&, tbb::split);
+
+    void operator()(const tbb::blocked_range<size_t>&);
+
+    void join(MaskGen& rhs) { mTree.merge(rhs.mTree); }
+
+private:
+
+    const BoolGridT& mMask;
+    const LeafManagerT& mLeafManager;
+    const math::Transform& mSrcXForm;
+    bool mInvertMask;
+    BoolTreeT mTree;
+};
+
+template<typename SrcTreeT>
+MaskGen<SrcTreeT>::MaskGen(const BoolGridT& mask, const LeafManagerT& srcLeafs,
+    const math::Transform& srcXForm, bool invertMask)
+    : mMask(mask)
+    , mLeafManager(srcLeafs)
+    , mSrcXForm(srcXForm)
+    , mInvertMask(invertMask)
+    , mTree(false)
+{
+}
+
+template<typename SrcTreeT>
+MaskGen<SrcTreeT>::MaskGen(MaskGen& rhs, tbb::split)
+    : mMask(rhs.mMask)
+    , mLeafManager(rhs.mLeafManager)
+    , mSrcXForm(rhs.mSrcXForm)
+    , mInvertMask(rhs.mInvertMask)
+    , mTree(false)
+{
+}
+
+
+template<typename SrcTreeT>
+void
+MaskGen<SrcTreeT>::run(bool threaded)
+{
+    if (threaded) {
+        tbb::parallel_reduce(mLeafManager.getRange(), *this);
+    } else {
+        (*this)(mLeafManager.getRange());
+    }
+}
+
+
+template<typename SrcTreeT>
+void
+MaskGen<SrcTreeT>::operator()(const tbb::blocked_range<size_t>& range)
+{
+    Coord ijk;
+    Vec3d xyz;
+    typedef typename BoolTreeT::LeafNodeType BoolLeafT;
+    const math::Transform& maskXForm = mMask.transform();
+    tree::ValueAccessor<const BoolTreeT> maskAcc(mMask.tree());
+    tree::ValueAccessor<BoolTreeT> acc(mTree);
+
+    typename SrcTreeT::LeafNodeType::ValueOnCIter iter;
+    for (size_t n = range.begin(); n != range.end(); ++n) {
+
+        ijk = mLeafManager.leaf(n).getOrigin();
+        BoolLeafT* leaf = new BoolLeafT(ijk, false);
+        bool addLeaf = false;
+
+        if (maskXForm == mSrcXForm) {
+
+            leaf->topologyUnion(mLeafManager.leaf(n));
+            const BoolLeafT* maskLeaf = maskAcc.probeConstLeaf(ijk);
+            if (maskLeaf) {
+                leaf->topologyDifference(*maskLeaf, false);
+                addLeaf = !leaf->isEmpty();
+            } else {
+                addLeaf = maskAcc.isValueOn(ijk) != mInvertMask; 
+            }
+
+        } else {
+            for (iter = mLeafManager.leaf(n).cbeginValueOn(); iter; ++iter) {
+                ijk = iter.getCoord();
+                xyz = maskXForm.worldToIndex(mSrcXForm.indexToWorld(ijk));
+                if(maskAcc.isValueOn(util::nearestCoord(xyz)) != mInvertMask) {
+                    leaf->setValueOn(iter.pos());
+                    addLeaf = true;
+                }
+            }
+        }
+
+        if (addLeaf) acc.addLeaf(leaf);
+        else delete leaf;
+    }
+}
+
+template<typename IntTreeT>
+struct BoundaryMergeOp
+{
+    typedef tree::ValueAccessor<IntTreeT> IntAccessorT;
+    typedef typename IntTreeT::LeafNodeType IntLeafT;
+
+    BoundaryMergeOp(IntTreeT& aux, IntTreeT& boundaryAux)
+        : mAuxAcc(aux), mBoundaryAuxAcc(boundaryAux) {}
+
+    template <typename LeafNodeType>
+    void operator()(LeafNodeType &leaf, size_t/*leafIndex*/) const
+    {
+        Coord ijk = leaf.getOrigin();
+
+        IntLeafT* auxLeaf = const_cast<IntLeafT*>(mAuxAcc.probeLeaf(ijk));
+        const IntLeafT* boundaryLeaf = mBoundaryAuxAcc.probeConstLeaf(ijk);
+
+        if (auxLeaf && boundaryLeaf) auxLeaf->merge(*boundaryLeaf);
+    }
+
+private:
+    IntAccessorT mAuxAcc, mBoundaryAuxAcc;
+};
+
+template<typename SrcTreeT>
+class BoundaryMaskGen
+{
+public:
+    typedef typename SrcTreeT::template ValueConverter<int>::Type IntTreeT;
+    typedef typename SrcTreeT::template ValueConverter<bool>::Type BoolTreeT;
+    typedef tree::ValueAccessor<const SrcTreeT> SrcAccessorT;
+    typedef tree::ValueAccessor<BoolTreeT> BoolAccessorT;
+
+    typedef tree::LeafManager<const IntTreeT> LeafManagerT;
+
+    //////////
+
+
+    BoundaryMaskGen(const LeafManagerT& auxLeafs, const SrcTreeT&, const BoolTreeT&);
+
+    void run(bool threaded = true);
+    
+    BoolTreeT&  tree() { return mTree; }
+
+    //////////
+
+    BoundaryMaskGen(BoundaryMaskGen&, tbb::split);
+
+    void operator()(const tbb::blocked_range<size_t>&);
+
+    void join(BoundaryMaskGen& rhs) { mTree.merge(rhs.mTree); }
+
+private:
+
+    const LeafManagerT& mLeafManager;
+    const SrcTreeT& mSrcTree;
+    const BoolTreeT& mMaskTree;
+    BoolTreeT mTree;
+};
+
+template<typename SrcTreeT>
+BoundaryMaskGen<SrcTreeT>::BoundaryMaskGen(
+    const LeafManagerT& auxLeafs, const SrcTreeT& srcTree, const BoolTreeT& boolTree)
+    : mLeafManager(auxLeafs)
+    , mSrcTree(srcTree)
+    , mMaskTree(boolTree)
+    , mTree(false)
+{
+}
+
+template<typename SrcTreeT>
+BoundaryMaskGen<SrcTreeT>::BoundaryMaskGen(BoundaryMaskGen& rhs, tbb::split)
+    : mLeafManager(rhs.mLeafManager)
+    , mSrcTree(rhs.mSrcTree)
+    , mMaskTree(rhs.mMaskTree)
+    , mTree(false)
+{
+}
+
+template<typename SrcTreeT>
+void
+BoundaryMaskGen<SrcTreeT>::run(bool threaded)
+{
+    if (threaded) {
+        tbb::parallel_reduce(mLeafManager.getRange(), *this);
+    } else {
+        (*this)(mLeafManager.getRange());
+    }
+}
+
+
+template<typename SrcTreeT>
+void
+BoundaryMaskGen<SrcTreeT>::operator()(const tbb::blocked_range<size_t>& range)
+{
+    Coord ijk;
+    typedef typename BoolTreeT::LeafNodeType BoolLeafT;
+    typedef typename SrcTreeT::LeafNodeType SrcLeafT;
+
+    tree::ValueAccessor<const SrcTreeT> srcAcc(mSrcTree);
+    tree::ValueAccessor<const BoolTreeT> maskAcc(mMaskTree);
+    tree::ValueAccessor<BoolTreeT> acc(mTree);
+
+    typename IntTreeT::LeafNodeType::ValueOnCIter iter;
+    for (size_t n = range.begin(); n != range.end(); ++n) {
+
+        ijk = mLeafManager.leaf(n).getOrigin();
+               
+        const SrcLeafT* srcLeaf = srcAcc.probeConstLeaf(ijk);
+        if (!srcLeaf) continue;
+
+        BoolLeafT* leaf = new BoolLeafT(ijk, false);
+        leaf->topologyUnion(*srcLeaf);
+
+        const BoolLeafT* maskLeaf = maskAcc.probeConstLeaf(ijk);
+        if (maskLeaf) {
+
+            leaf->topologyDifference(*maskLeaf, false);
+
+            if (!leaf->isEmpty()) acc.addLeaf(leaf);
+            else delete leaf;
+
+        } else {
+            acc.addLeaf(leaf);
+        }
+    }
+}
+
+
+////////////////////////////////////////
+
+
+template<typename SrcTreeT, typename LeafManagerT = tree::LeafManager<const SrcTreeT>, typename AuxDataT = int>
 class AuxiliaryData
 {
 public:
-    typedef openvdb::tree::ValueAccessor<const DistTreeT> SourceAccessorT;
-    typedef typename DistTreeT::ValueType ValueT;
+    typedef typename SrcTreeT::ValueType SrcValueT;
+    typedef typename SrcTreeT::template ValueConverter<char>::Type CharTreeT;
+    typedef typename SrcTreeT::template ValueConverter<AuxDataT>::Type AuxTreeT;
+    typedef tree::ValueAccessor<const SrcTreeT> SrcAccessorT;
+    typedef tree::ValueAccessor<CharTreeT> CharAccessorT;
+    typedef tree::ValueAccessor<AuxTreeT> AuxAccessorT;
 
-    typedef typename DistTreeT::template ValueConverter<char>::Type CharTreeT;
-    typedef openvdb::tree::ValueAccessor<CharTreeT> EdgeAccessorT;
+    //////////
 
-    typedef typename DistTreeT::template ValueConverter<AuxDataT>::Type AuxTreeT;
-    typedef openvdb::tree::ValueAccessor<AuxTreeT> AuxAccessorT;
 
-    AuxiliaryData(const DistTreeT&, const LeafCPtrList<DistTreeT>&,
-        double iso = 0.0, bool extraCheck = false);
-    AuxiliaryData(AuxiliaryData&, tbb::split);
+    AuxiliaryData(const SrcTreeT&, const LeafManagerT&, double iso, bool extraCheck = false);
 
-    void runParallel();
-    void runSerial();
+    void run(bool threaded = true);
 
     typename CharTreeT::Ptr edgeTree() const { return mEdgeTree; }
     typename AuxTreeT::Ptr auxTree() const { return mAuxTree; }
+
+
+    //////////
+
+    AuxiliaryData(AuxiliaryData&, tbb::split);
 
     void operator()(const tbb::blocked_range<size_t>&);
 
@@ -1686,26 +2256,28 @@ public:
     }
 
 private:
-    const LeafCPtrList<DistTreeT>& mLeafNodes;
-    const DistTreeT& mSourceTree;
-    SourceAccessorT mSourceAccessor;
+
+    int edgeCheck(const Coord& ijk, const bool thisInside);
+
+    const LeafManagerT& mLeafManager;
+
+    const SrcTreeT& mSourceTree;
+    SrcAccessorT mSourceAccessor;
 
     typename CharTreeT::Ptr mEdgeTree;
-    EdgeAccessorT mEdgeAccessor;
+    CharAccessorT mEdgeAccessor;
 
     typename AuxTreeT::Ptr mAuxTree;
     AuxAccessorT mAuxAccessor;
 
     const double mIsovalue;
     const bool mExtraCheck;
-
-    int edgeCheck(const Coord& ijk, const bool thisInside);
 };
 
-template<class DistTreeT, class AuxDataT>
-AuxiliaryData<DistTreeT, AuxDataT>::AuxiliaryData(const DistTreeT& tree,
-    const LeafCPtrList<DistTreeT>& leafNodes, double iso, bool extraCheck)
-    : mLeafNodes(leafNodes)
+template<typename SrcTreeT, typename LeafManagerT, typename AuxDataT>
+AuxiliaryData<SrcTreeT, LeafManagerT, AuxDataT>::AuxiliaryData(const SrcTreeT& tree,
+    const LeafManagerT& leafs, double iso, bool extraCheck)
+    : mLeafManager(leafs)
     , mSourceTree(tree)
     , mSourceAccessor(mSourceTree)
     , mEdgeTree(new CharTreeT(0))
@@ -1717,9 +2289,9 @@ AuxiliaryData<DistTreeT, AuxDataT>::AuxiliaryData(const DistTreeT& tree,
 {
 }
 
-template<class DistTreeT, class AuxDataT>
-AuxiliaryData<DistTreeT, AuxDataT>::AuxiliaryData(AuxiliaryData& rhs, tbb::split)
-    : mLeafNodes(rhs.mLeafNodes)
+template<typename SrcTreeT, typename LeafManagerT, typename AuxDataT>
+AuxiliaryData<SrcTreeT, LeafManagerT, AuxDataT>::AuxiliaryData(AuxiliaryData& rhs, tbb::split)
+    : mLeafManager(rhs.mLeafManager)
     , mSourceTree(rhs.mSourceTree)
     , mSourceAccessor(mSourceTree)
     , mEdgeTree(new CharTreeT(0))
@@ -1732,36 +2304,35 @@ AuxiliaryData<DistTreeT, AuxDataT>::AuxiliaryData(AuxiliaryData& rhs, tbb::split
 }
 
 
-
-template<class DistTreeT, typename AuxDataT>
+template<typename SrcTreeT, typename LeafManagerT, typename AuxDataT>
 void
-AuxiliaryData<DistTreeT, AuxDataT>::runParallel()
+AuxiliaryData<SrcTreeT, LeafManagerT, AuxDataT>::run(bool threaded)
 {
-    tbb::parallel_reduce(mLeafNodes.getRange(), *this);
+    if (threaded) {
+        tbb::parallel_reduce(mLeafManager.getRange(), *this);
+    } else {
+        (*this)(mLeafManager.getRange());
+    }
 }
 
-template<class DistTreeT, typename AuxDataT>
-void
-AuxiliaryData<DistTreeT, AuxDataT>::runSerial()
-{
-    (*this)(mLeafNodes.getRange());
-}
 
-template<class DistTreeT, typename AuxDataT>
+template<typename SrcTreeT, typename LeafManagerT, typename AuxDataT>
 void
-AuxiliaryData<DistTreeT, AuxDataT>::operator()(const tbb::blocked_range<size_t>& range)
+AuxiliaryData<SrcTreeT, LeafManagerT, AuxDataT>::operator()(const tbb::blocked_range<size_t>& range)
 {
-    typename DistTreeT::LeafNodeType::ValueOnCIter iter;
+    typename LeafManagerT::TreeType::LeafNodeType::ValueOnCIter iter;
     Coord ijk;
     bool thisInside;
     int edgeFlags;
-    ValueT val;
+    SrcValueT val;
 
     if (!mExtraCheck) {
         for (size_t n = range.begin(); n != range.end(); ++n) {
-            for (iter = mLeafNodes[n]->cbeginValueOn(); iter; ++iter) {
+            for (iter = mLeafManager.leaf(n).cbeginValueOn(); iter; ++iter) {
+
                 ijk = iter.getCoord();
-                thisInside = iter.getValue() < mIsovalue;
+
+                thisInside = mSourceAccessor.getValue(ijk) < mIsovalue;
                 edgeFlags = edgeCheck(ijk, thisInside);
 
                 if (edgeFlags != 0) {
@@ -1772,10 +2343,11 @@ AuxiliaryData<DistTreeT, AuxDataT>::operator()(const tbb::blocked_range<size_t>&
         }
     } else {
         for (size_t n = range.begin(); n != range.end(); ++n) {
-            for (iter = mLeafNodes[n]->cbeginValueOn(); iter; ++iter) {
+            for (iter = mLeafManager.leaf(n).cbeginValueOn(); iter; ++iter) {
 
                 ijk = iter.getCoord();
-                thisInside = iter.getValue() < mIsovalue;
+
+                thisInside = mSourceAccessor.getValue(ijk) < mIsovalue;
                 edgeFlags = edgeCheck(ijk, thisInside);
 
                 if (edgeFlags != 0) {
@@ -1822,9 +2394,9 @@ AuxiliaryData<DistTreeT, AuxDataT>::operator()(const tbb::blocked_range<size_t>&
     }
 }
 
-template<class DistTreeT, typename AuxDataT>
+template<typename SrcTreeT, typename LeafManagerT, typename AuxDataT>
 inline int
-AuxiliaryData<DistTreeT, AuxDataT>::edgeCheck(const Coord& ijk, const bool thisInside)
+AuxiliaryData<SrcTreeT, LeafManagerT, AuxDataT>::edgeCheck(const Coord& ijk, const bool thisInside)
 {
     int edgeFlags = 0;
     Coord n_ijk, coord;
@@ -1887,6 +2459,8 @@ AuxiliaryData<DistTreeT, AuxDataT>::edgeCheck(const Coord& ijk, const bool thisI
     }
     return edgeFlags;
 }
+
+
 
 
 ////////////////////////////////////////
@@ -2100,26 +2674,47 @@ EdgeSmooth<DistTreeT>::operator()(const tbb::blocked_range<size_t>& range) const
                     ++count;
                 }
             }
-
-            if (count > 1) {
+            
+            if (count > 2) {
                 avg *= (1.0 / float(count));
-
+                
                 // Constrain to current cell
                 bmin = openvdb::Vec3s(mTransform.indexToWorld(ijk));
                 bmax = bmin + dx;
 
-                bool inCell = true;
+                bool inCell = false;
                 for (int i = 0; i < 10; ++i) {
 
                     inCell = pointInAABB(avg, bmin, bmax);
 
-                    if (inCell) break;
+                    if (inCell) {
+                        break;
+                    }
 
                     avg += ptn;
                     avg *= 0.5;
                 }
 
                 if (inCell) ptn = avg;
+                
+                /*Vec3d a = mTransform.worldToIndex(ptn);
+                Vec3d b = mTransform.worldToIndex(avg);
+
+                bmin[0] = float(ijk[0]);
+                bmin[1] = float(ijk[1]);
+                bmin[2] = float(ijk[2]);
+                bmax = bmin + 1.0;
+
+                if(!pointInAABB(a, bmin, bmax)) continue;
+
+                while (true) {
+                    if(pointInAABB(b, bmin, bmax)) break;
+
+                    b += a;
+                    b *= 0.5;
+                }
+
+                ptn = mTransform.indexToWorld(b);*/
             }
         }
     }
@@ -2401,8 +2996,16 @@ inline VolumeToMesh::VolumeToMesh(double isovalue, double adaptivity)
     , mPrimAdaptivity(adaptivity)
     , mSecAdaptivity(0.0)
     , mRefGrid(GridBase::ConstPtr())
+    , mSurfaceMaskGrid(GridBase::ConstPtr())
+    , mAdaptivityGrid(GridBase::ConstPtr())
+    , mAdaptivityMaskTree(TreeBase::ConstPtr())
     , mRefEdgeTree(TreeBase::Ptr())
     , mRefTopologyMaskTree(TreeBase::Ptr())
+    , mSeamPointTree(TreeBase::Ptr())
+    , mSmoothSeams(false)
+    , mInvertSurfaceMask(false)
+    , mPartitions(1)
+    , mActivePart(0)
 {
 }
 
@@ -2452,6 +3055,34 @@ VolumeToMesh::setRefGrid(const GridBase::ConstPtr& grid, double secAdaptivity, b
     mSmoothSeams = smoothSeams;
 }
 
+inline void
+VolumeToMesh::setSurfaceMask(const GridBase::ConstPtr& mask, bool invertMask)
+{
+    mSurfaceMaskGrid = mask;
+    mInvertSurfaceMask = invertMask;
+}
+
+inline void
+VolumeToMesh::setSpatialAdaptivity(const GridBase::ConstPtr& grid)
+{
+    mAdaptivityGrid = grid;
+}
+
+inline void
+VolumeToMesh::setAdaptivityMask(const TreeBase::ConstPtr& tree)
+{
+   mAdaptivityMaskTree = tree;
+}
+
+inline void
+VolumeToMesh::partition(unsigned partitions, unsigned activePart)
+{
+    mPartitions = std::max(partitions, unsigned(1));
+    mActivePart = std::min(activePart, mPartitions-1);
+}
+
+
+
 
 template<typename GridT>
 inline void
@@ -2464,28 +3095,111 @@ VolumeToMesh::operator()(const GridT& distGrid)
     typedef typename DistTreeT::template ValueConverter<int>::Type IntTreeT;
     typedef typename DistTreeT::template ValueConverter<Vec3s>::Type Vec3sTreeT;
     typedef typename DistTreeT::template ValueConverter<bool>::Type BoolTreeT;
+    typedef Grid<BoolTreeT> BoolGridT;
 
-    const bool noAdaptivity = mPrimAdaptivity < 1e-6 && mSecAdaptivity < 1e-6;
-
+    typedef typename DistTreeT::template ValueConverter<float>::Type FloatTreeT;
+    typedef Grid<FloatTreeT> FloatGridT;
+    
     const openvdb::math::Transform& transform = distGrid.transform();
     const DistTreeT& distTree = distGrid.tree();
     typename CharTreeT::Ptr edgeTree; // edge flags
     typename IntTreeT::Ptr auxTree; // auxiliary data
+    typename BoolTreeT::Ptr pointMask;
 
     const bool nonLevelSetGrid = distGrid.getGridClass() != GRID_LEVEL_SET;
+    const bool noAdaptivity = mPrimAdaptivity < 1e-6 && mSecAdaptivity < 1e-6;
 
     const bool extraSignCheck = nonLevelSetGrid ||
         (std::abs(mIsovalue - double(distGrid.background())) < (1.5 * transform.voxelSize()[0]));
 
+    const BoolGridT * surfaceMask = NULL;
+    if (mSurfaceMaskGrid) {
+        surfaceMask = static_cast<const BoolGridT*>(mSurfaceMaskGrid.get());
+    }
 
+    const FloatGridT * adaptivityField = NULL;
+    if (mAdaptivityGrid) {
+        adaptivityField = static_cast<const FloatGridT*>(mAdaptivityGrid.get());
+    }
 
     // Collect auxiliary data
     {
-        internal::LeafCPtrList<DistTreeT> sourceLeafs(distTree);
-        internal::AuxiliaryData<DistTreeT> op(distTree, sourceLeafs, mIsovalue, extraSignCheck);
-        op.runParallel();
-        edgeTree = op.edgeTree();
-        auxTree = op.auxTree();
+        if (surfaceMask || mPartitions > 1) {
+
+            BoolTreeT valueMask(false);
+
+            if (surfaceMask) {
+
+                // Mask
+                {
+                    tree::LeafManager<const DistTreeT> leafs(distTree);
+                    internal::MaskGen<DistTreeT> masking(*surfaceMask, leafs, transform, mInvertSurfaceMask);
+                    masking.run();
+                    valueMask.merge(masking.tree());
+                }
+
+                // Partition
+                if (mPartitions > 1) {
+                    tree::LeafManager<BoolTreeT> leafs(valueMask);
+                    leafs.transformLeafs(
+                        internal::PartOp(leafs.leafCount() , mPartitions, mActivePart));
+                    valueMask.pruneInactive();
+                }
+
+            } else {
+
+                // Partition
+                tree::LeafManager<const DistTreeT> leafs(distTree);
+                internal::PartGen<DistTreeT> partitioner(leafs, mPartitions, mActivePart);
+                partitioner.run();
+                valueMask.merge(partitioner.tree());
+            }
+
+            {
+                tree::LeafManager<BoolTreeT> leafs(valueMask);
+                internal::AuxiliaryData<DistTreeT, tree::LeafManager<BoolTreeT> >
+                    op(distTree, leafs, mIsovalue, extraSignCheck);
+                op.run();
+
+                edgeTree = op.edgeTree();
+                auxTree = op.auxTree();
+            }
+
+
+            if (!noAdaptivity) {
+                pointMask = typename BoolTreeT::Ptr(new BoolTreeT(false));
+                pointMask->topologyUnion(*auxTree);
+
+//                tree::LeafManager<const IntTreeT> auxLeafs(*auxTree);
+//                    internal::BoundaryMaskGen<DistTreeT> boundary(auxLeafs, distTree, valueMask);
+//                boundary.run();
+
+                {
+//                    tree::LeafManager<BoolTreeT> leafs(boundary.tree());
+//                    internal::AuxiliaryData<DistTreeT, tree::LeafManager<BoolTreeT> >
+//                        op(distTree, leafs, mIsovalue, extraSignCheck);
+
+                    tree::LeafManager<const DistTreeT> leafs(distTree);
+                    internal::AuxiliaryData<DistTreeT> op(distTree, leafs, mIsovalue, extraSignCheck);
+
+                    tree::LeafManager<const IntTreeT> auxLeafs(*auxTree);
+
+                    op.run();
+                    auxLeafs.transformLeafs(
+                        internal::BoundaryMergeOp<IntTreeT>(*auxTree, *op.auxTree()));
+                }
+
+            }
+
+        } else {
+
+            tree::LeafManager<const DistTreeT> leafs(distTree);
+            internal::AuxiliaryData<DistTreeT> op(distTree, leafs, mIsovalue, extraSignCheck);
+            op.run();
+
+            edgeTree = op.edgeTree();
+            auxTree = op.auxTree();
+        }
 
         // Collect auxiliary data from active tiles
         if (nonLevelSetGrid) {
@@ -2505,10 +3219,10 @@ VolumeToMesh::operator()(const GridT& distGrid)
 
             // Cache reference data for reuse.
             if (!mRefEdgeTree && !mRefTopologyMaskTree) {
-                internal::LeafCPtrList<DistTreeT> leafs(*refData.mDistTree);
-                internal::AuxiliaryData<DistTreeT, bool> op(
+                tree::LeafManager<const DistTreeT> leafs(*refData.mDistTree);
+                internal::AuxiliaryData<DistTreeT, tree::LeafManager<const DistTreeT>, bool> op(
                     *refData.mDistTree, leafs, mIsovalue, extraSignCheck);
-                op.runParallel();
+                op.run();
                 mRefEdgeTree = op.edgeTree();
                 mRefTopologyMaskTree = op.auxTree();
                 mSeamPointTree = typename Vec3sTreeT::Ptr(new Vec3sTreeT(Vec3s(0.0)));
@@ -2535,12 +3249,22 @@ VolumeToMesh::operator()(const GridT& distGrid)
         op.runParallel();
 
         refData.mSeamMaskTree->pruneInactive();
-        edgeMaskTree.topologyUnion(*refData.mSeamMaskTree);
-        dilateVoxels(*refData.mSeamMaskTree);
-        dilateVoxels(*refData.mSeamMaskTree);
-        dilateVoxels(*refData.mSeamMaskTree);
-    }
 
+        edgeMaskTree.topologyUnion(*refData.mSeamMaskTree);
+
+        dilateVoxels(*refData.mSeamMaskTree);
+        dilateVoxels(*refData.mSeamMaskTree);
+        dilateVoxels(*refData.mSeamMaskTree);
+
+
+        if (mAdaptivityMaskTree) {
+
+            const BoolTreeT* refGrid = static_cast<const BoolTreeT*>(
+                 mAdaptivityMaskTree.get());
+
+            refData.mSeamMaskTree->topologyUnion(*refGrid);
+        }
+    }
 
     // Process auxiliary data
     {
@@ -2553,9 +3277,15 @@ VolumeToMesh::operator()(const GridT& distGrid)
                 count.runParallel();
             } else {
                 internal::Merge<DistTreeT> merge(distTree, auxLeafs,
-                    regions, DistValueT(mIsovalue), DistValueT(mPrimAdaptivity));
+                    regions, DistValueT(mIsovalue), DistValueT(mPrimAdaptivity), pointMask.get());
+
                 merge.setRefData(refData);
-                merge.runParallel();
+
+                if (adaptivityField) {
+                    merge.setSpatialAdaptivity(transform, *adaptivityField);
+                }
+
+                merge.run();
             }
 
             mPointListSize = 0;
@@ -2585,6 +3315,7 @@ VolumeToMesh::operator()(const GridT& distGrid)
 
     // Smooth seam line edges
     if (mSmoothSeams && refData.isValid()) {
+
         refData.mSmoothingMaskTree->pruneInactive();
         internal::LeafPtrList<BoolTreeT> leafs(*refData.mSmoothingMaskTree);
         internal::EdgeSmooth<DistTreeT> op(leafs, edgeMaskTree, *auxTree, mPoints, transform);
@@ -2602,7 +3333,7 @@ VolumeToMesh::operator()(const GridT& distGrid)
                 ijk = valueIt.getCoord();
                 const int idx = auxAcc.getValue(ijk);
                 if (idx != 0 && !ptnAcc.isValueOn(ijk)) {
-                   ptnAcc.setValue(ijk, mPoints[idx]);
+                    ptnAcc.setValue(ijk, mPoints[idx]);
                 }
             }
         }

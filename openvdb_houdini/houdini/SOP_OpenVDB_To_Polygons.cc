@@ -43,7 +43,9 @@
 
 #include <openvdb/tools/VolumeToMesh.h>
 #include <openvdb/tools/MeshToVolume.h>
+#include <openvdb/tools/LevelSetUtil.h>
 #include <openvdb/math/Operators.h>
+#include <openvdb/math/Mat3.h>
 
 #include <UT/UT_Interrupt.h>
 #include <GA/GA_PageIterator.h>
@@ -51,7 +53,9 @@
 #include <GU/GU_Surfacer.h>
 #include <GU/GU_PolyReduce.h>
 #include <GU/GU_PrimPoly.h>
+#include <GU/GU_ConvertParms.h>
 #include <PRM/PRM_Parm.h>
+
 
 #include <boost/algorithm/string/join.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
@@ -59,10 +63,12 @@
 #include <boost/utility/enable_if.hpp>
 #include <boost/type_traits/is_integral.hpp>
 #include <boost/type_traits/is_floating_point.hpp>
-
+#include <boost/math/special_functions/round.hpp>
 #include <string>
 #include <list>
 #include <vector>
+
+
 
 namespace hvdb = openvdb_houdini;
 namespace hutil = houdini_utils;
@@ -81,6 +87,8 @@ public:
 
     virtual int isRefInput(unsigned i) const { return (i > 0); }
 
+    void checkActivePart(float time);
+
 protected:
     virtual OP_ERROR cookMySop(OP_Context&);
     virtual unsigned disableParms();
@@ -98,6 +106,36 @@ protected:
 ////////////////////////////////////////
 
 
+namespace {
+
+// Callback to check partition limit
+int
+checkActivePartCB(void* data, int /*idx*/, float time, const PRM_Template*)
+{
+    SOP_OpenVDB_To_Polygons* sop = static_cast<SOP_OpenVDB_To_Polygons*>(data);
+    if (sop == NULL) return 0;
+    sop->checkActivePart(time);
+    return 1;
+}
+
+} // namespace
+
+
+void
+SOP_OpenVDB_To_Polygons::checkActivePart(float time)
+{
+    const int partitions = evalInt("automaticpartitions", 0, time);
+    const int activepart = evalInt("activepart", 0, time);
+
+    if (activepart > partitions) {
+        setInt("activepart", 0, time, partitions);
+    }
+}
+
+
+////////////////////////////////////////
+
+
 void
 newSopOperator(OP_OperatorTable* table)
 {
@@ -105,65 +143,136 @@ newSopOperator(OP_OperatorTable* table)
 
     hutil::ParmList parms;
 
-    // Group
     parms.add(hutil::ParmFactory(PRM_STRING, "group", "Group")
         .setHelpText("Specify a subset of the input VDB grids to surface.")
         .setChoiceList(&hutil::PrimGroupMenu));
 
+    parms.add(hutil::ParmFactory(PRM_FLT_J, "isovalue", "Isovalue")
+        .setDefault(PRMzeroDefaults)
+        .setRange(PRM_RANGE_UI, -1.0, PRM_RANGE_UI, 1.0)
+        .setHelpText("The crossing point of the VDB values that is considered "
+            "the surface. The zero default value works for signed distance "
+            "fields while fog volumes require a larger positive value, 0.5 is "
+            "a good initial guess."));
+
     parms.add(hutil::ParmFactory(PRM_FLT_J, "adaptivity", "Adaptivity")
         .setRange(PRM_RANGE_RESTRICTED, 0.0, PRM_RANGE_RESTRICTED, 1.0)
-        .setHelpText("Adaptivity threshold. (If a reference surface is "
-            "provided this will only control the adaptivity in regions "
-            "that are not interior to the reference surface.)"));
+        .setHelpText("The adaptivity threshold determines how closely the "
+            "isosurface is matched by the resulting mesh. Higher thresholds "
+            "will allow more variation in polygon size, using fewer polygons "
+            "to express the surface."));
 
-    parms.add(hutil::ParmFactory(PRM_FLT_J, "isovalue", "Iso Value")
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "computenormals", "Compute Vertex Normals")
+        .setHelpText("Computes edge preserving vertex normals."));
+
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "keepvdbname", "Preserve VDB Name")
+        .setHelpText("Mark each primitive with the corresponding VDB name."));
+
+    parms.add(hutil::ParmFactory(PRM_INT_J, "automaticpartitions", "Automatic Partitions")
+        .setRange(PRM_RANGE_RESTRICTED, 1, PRM_RANGE_UI, 20)
+        .setHelpText("Subdivide volume and mesh into disjoint parts. (In development)")
+        .setDefault(PRMoneDefaults)
+        .setCallbackFunc(&checkActivePartCB));
+
+    parms.add(hutil::ParmFactory(PRM_INT_J, "activepart", "Active Part")
+        .setRange(PRM_RANGE_RESTRICTED, 1, PRM_RANGE_UI, 20)
+        .setHelpText("Specific partition to mesh.")
         .setDefault(PRMzeroDefaults)
-        .setRange(PRM_RANGE_UI, -1.0, PRM_RANGE_UI, 1.0));
+        .setCallbackFunc(&checkActivePartCB));
 
-    parms.add(hutil::ParmFactory(PRM_TOGGLE, "computenormals", "Compute Vertex Normals"));
 
-    parms.add(hutil::ParmFactory(PRM_TOGGLE, "keepvdbname", "Preserve VDB Name"));
+    //////////
 
-    parms.add(hutil::ParmFactory(PRM_SEPARATOR,"sep1", ""));
+
+    parms.add(hutil::ParmFactory(PRM_HEADING,"sep1", "Reference Options"));
 
     parms.add(hutil::ParmFactory(PRM_FLT_J, "internaladaptivity", "Internal Adaptivity")
         .setRange(PRM_RANGE_RESTRICTED, 0.0, PRM_RANGE_RESTRICTED, 1.0)
-        .setHelpText("Adaptivity threshold for regions that are "
-            "interior to the reference surface."));
+        .setHelpText("Overrides the adaptivity threshold for all internal surfaces."));
 
-    parms.add(hutil::ParmFactory(PRM_TOGGLE, "transferattributes", "Transfer Surface Attributes"));
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "transferattributes", "Transfer Surface Attributes")
+        .setHelpText("Transfers all attributes (primitive, vertex and point) from the "
+            "reference surface. Will override computed vertex normals for primitives "
+            " in the surface group."));
+
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "smoothseams", "Smooth Seams")
         .setDefault(PRMoneDefaults)
         .setHelpText("Smooth seam line edges during mesh extraction, "
             "removes staircase artifacts"));
 
-    //parms.add(hutil::ParmFactory(PRM_TOGGLE, "reconstruct", "Reconstruct Sharp Features"));
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "sharpenfeatures", "Sharpen Features")
+        .setDefault(PRMoneDefaults)
+        .setHelpText("Sharpen edges and corners."));
+
+    parms.add(hutil::ParmFactory(PRM_FLT_J, "edgetolerance", "Edge Tolerance")
+        .setDefault(0.5)
+        .setRange(PRM_RANGE_RESTRICTED, 0.0, PRM_RANGE_RESTRICTED, 1.0)
+        .setHelpText("Controls the edge adaptivity mask. (This is a temporary/experimental setting)"));
 
     parms.add(hutil::ParmFactory(PRM_STRING, "surfacegroup", "Surface Group")
         .setDefault("surface_polygons")
-        .setHelpText("Group all polygons that are coincident with the reference "
-            "surface. (Attributes from the reference surface such as uv "
-            "coordinates, normals etc. can be transfered to these polygons.)"));
+        .setHelpText("Specifies a group for all polygons that are coincident with the "
+            "reference surface. This group is useful for transferring attributes such "
+            "as uv coordinates, normals etc. from the reference surface."));
 
     parms.add(hutil::ParmFactory(PRM_STRING, "interiorgroup", "Interior Group")
         .setDefault("interior_polygons")
-        .setHelpText("Group all polygons that are interior to reference surface. "
-            "(These might need projected UV coordinates or a different material.)"));
+        .setHelpText("Specifies a group for all polygons that are interior to the "
+            "reference surface. This group can be used to identify surface regions "
+            "that might require projected uv coordinates or new materials."));
 
     parms.add(hutil::ParmFactory(PRM_STRING, "seamlinegroup", "Seam Line Group")
         .setDefault("seam_polygons")
-        .setHelpText("Group all polygons that are in proximity to the seam lines. "
-            "(Used to drive secondary elements such as debris and dust.)"));
+        .setHelpText("Specifies a group for all polygons that are in proximity to "
+            "the seam lines. This group can be used to drive secondary elements such "
+            "as debris and dust."));
+ 
 
-    // Register this operator.
+    //////////
+
+
+    parms.add(hutil::ParmFactory(PRM_HEADING,"sep2", "Masking Options"));
+
+ 
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "surfacemask", "")
+        .setDefault(PRMoneDefaults)
+        .setTypeExtended(PRM_TYPE_TOGGLE_JOIN)
+        .setHelpText("Enable / disable the surface mask."));
+
+    parms.add(hutil::ParmFactory(PRM_STRING, "surfacemaskname", "Surface Mask")
+        .setHelpText("A single level-set or sdf grid whose interior defines the region to mesh.")
+        .setSpareData(&SOP_Node::theThirdInput)
+        .setChoiceList(&hutil::PrimGroupMenu));
+
+    parms.add(hutil::ParmFactory(PRM_FLT_J, "surfacemaskoffset", "Offset")
+        .setDefault(PRMzeroDefaults)
+        .setHelpText("Isovalue used to offset the interior region of the surface mask.")
+        .setRange(PRM_RANGE_UI, -1.0, PRM_RANGE_UI, 1.0));
+
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "invertmask", "Invert Surface Mask")
+        .setHelpText("Used to mesh the complement of the mask."));
+
+
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "adaptivityfield", "")
+        .setTypeExtended(PRM_TYPE_TOGGLE_JOIN)
+        .setHelpText("Enable / disable the the adaptivity field."));
+
+    parms.add(hutil::ParmFactory(PRM_STRING, "adaptivityfieldname", "Adaptivity Field")
+        .setHelpText("A single scalar grid used as an spatial multiplier for the adaptivity threshold.")
+        .setSpareData(&SOP_Node::theThirdInput)
+        .setChoiceList(&hutil::PrimGroupMenu));
+
+
+    //////////
+
+
     hvdb::OpenVDBOpFactory("OpenVDB To Polygons", SOP_OpenVDB_To_Polygons::factory, parms, *table)
         .addInput("OpenVDB grids to surface")
-        .addOptionalInput("Optional reference surface. (When surfacing fractured fragments, "
-            "the unfractured level set or polygonal model can be used to eliminate seams.");
+        .addOptionalInput("Optional reference surface. Can be used "
+            "to transfer attributes, sharpen features and to "
+            "eliminate seams from fractured pieces.")
+        .addOptionalInput("Optional VDB masks");
 }
-
-
-////////////////////////////////////////
 
 
 OP_Node*
@@ -181,22 +290,137 @@ SOP_OpenVDB_To_Polygons::SOP_OpenVDB_To_Polygons(OP_Network* net,
 }
 
 
-// Disable UI Parms.
 unsigned
 SOP_OpenVDB_To_Polygons::disableParms()
 {
     unsigned changed = 0;
 
-    int refexists = (nInputs() == 2);
+    const bool refexists = (nInputs() == 2);
+
     changed += enableParm("internaladaptivity", refexists);
     changed += enableParm("surfacegroup", refexists);
     changed += enableParm("interiorgroup", refexists);
     changed += enableParm("seamlinegroup", refexists);
     changed += enableParm("transferattributes", refexists);
     changed += enableParm("smoothseams", refexists);
-    //changed += enableParm("reconstruct", refexists);
+    changed += enableParm("sharpenfeatures", refexists);
+    changed += enableParm("edgetolerance", refexists);
+
+    const bool maskexists = (nInputs() == 3);
+
+    changed += enableParm("surfacemask", maskexists);
+    changed += enableParm("adaptivitymask", maskexists);
+
+    const bool surfacemask = bool(evalInt("surfacemask", 0, 0));
+    changed += enableParm("surfacemaskname", maskexists && surfacemask);
+    changed += enableParm("surfacemaskoffset", maskexists && surfacemask);
+    changed += enableParm("invertmask", maskexists && surfacemask);
+
+    const bool adaptivitymask = bool(evalInt("adaptivityfield", 0, 0));
+    changed += enableParm("adaptivityfieldname", maskexists && adaptivitymask);
+  
+    const bool partition = evalInt("automaticpartitions", 0, 0) > 1;
+    changed += enableParm("activepart", partition);
+ 
     return changed;
 }
+
+
+////////////////////////////////////////
+
+
+/// @brief  TBB body object for threaded sharp feature construction.
+template <typename IndexTreeType, typename BoolTreeType>
+class GenAdaptivityMaskOp
+{
+public:
+    typedef openvdb::tree::LeafManager<BoolTreeType> BoolLeafManager;
+
+    GenAdaptivityMaskOp(const GU_Detail& refGeo,
+        const IndexTreeType& indexTree, BoolLeafManager& leafs, float edgetolerance = 0.0);
+
+    void run(bool threaded = true);
+
+    void operator()(const tbb::blocked_range<size_t> &range) const;
+
+private:
+    const GU_Detail& mRefGeo;
+    const IndexTreeType& mIndexTree;
+    BoolLeafManager& mLeafs;
+    float mEdgeTolerance;
+};
+
+
+template <typename IndexTreeType, typename BoolTreeType>
+GenAdaptivityMaskOp<IndexTreeType, BoolTreeType>::GenAdaptivityMaskOp(const GU_Detail& refGeo,
+    const IndexTreeType& indexTree, BoolLeafManager& leafs, float edgetolerance)
+    : mRefGeo(refGeo)
+    , mIndexTree(indexTree)
+    , mLeafs(leafs)
+    , mEdgeTolerance(edgetolerance)
+{
+    mEdgeTolerance = std::max(0.0f, mEdgeTolerance);
+    mEdgeTolerance = std::min(1.0f, mEdgeTolerance);
+}
+
+
+template <typename IndexTreeType, typename BoolTreeType>
+void
+GenAdaptivityMaskOp<IndexTreeType, BoolTreeType>::run(bool threaded)
+{
+    if (threaded) {
+        tbb::parallel_for(mLeafs.getRange(), *this);
+    } else {
+        (*this)(mLeafs.getRange());
+    }
+}
+
+
+template <typename IndexTreeType, typename BoolTreeType>
+void
+GenAdaptivityMaskOp<IndexTreeType, BoolTreeType>::operator()(const tbb::blocked_range<size_t> &range) const
+{
+    typedef typename openvdb::tree::ValueAccessor<const IndexTreeType> IndexAccessorType;
+    IndexAccessorType idxAcc(mIndexTree);
+
+    UT_Vector3 tmpN, normal;
+    GA_Offset primOffset;
+    int tmpIdx;
+
+    openvdb::Coord ijk, nijk;
+    typename BoolTreeType::LeafNodeType::ValueOnIter iter;
+
+    for (size_t n = range.begin(); n < range.end(); ++n) {
+        iter = mLeafs.leaf(n).beginValueOn();
+        for (; iter; ++iter) {
+            ijk = iter.getCoord();
+            
+            bool edgeVoxel = false;
+
+            int idx = idxAcc.getValue(ijk);
+
+            primOffset = mRefGeo.primitiveOffset(idx);
+            normal = mRefGeo.getGEOPrimitive(primOffset)->computeNormal();
+
+            for (size_t i = 0; i < 18; ++i) {
+                nijk = ijk + openvdb::util::COORD_OFFSETS[i];
+                if (idxAcc.probeValue(nijk, tmpIdx) && tmpIdx != idx) {
+                    primOffset = mRefGeo.primitiveOffset(tmpIdx);
+                    tmpN = mRefGeo.getGEOPrimitive(primOffset)->computeNormal();
+
+                    if (normal.dot(tmpN) < mEdgeTolerance) {
+                        edgeVoxel = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!edgeVoxel) iter.setValueOff();
+        }
+    }
+}
+
+
 
 
 ////////////////////////////////////////
@@ -215,20 +439,20 @@ copyMesh(
     const openvdb::tools::PointList& points = mesher.pointList();
     openvdb::tools::PolygonPoolList& polygonPoolList = mesher.polygonPoolList();
 
-    const GA_Offset lastIdx(detail.getNumPoints());
+    const char exteriorFlag = char(openvdb::tools::POLYFLAG_EXTERIOR);
+    const char seamLineFlag = char(openvdb::tools::POLYFLAG_FRACTURE_SEAM);
 
+    const GA_Index firstPrim = detail.primitives().entries();
+
+#if (UT_VERSION_INT < 0x0c0500F5) // earlier than 12.5.245
+   
+    const GA_Offset lastIdx(detail.getNumPoints());
     for (size_t n = 0, N = mesher.pointListSize(); n < N; ++n) {
         GA_Offset ptoff = detail.appendPointOffset();
         detail.setPos3(ptoff, points[n].x(), points[n].y(), points[n].z());
     }
 
-    if (boss.wasInterrupted()) return;
-
-    const char exteriorFlag = char(openvdb::tools::POLYFLAG_EXTERIOR);
-    const char seamLineFlag = char(openvdb::tools::POLYFLAG_FRACTURE_SEAM);
-
-
-    const GA_Index firstPrim = detail.primitives().entries();
+    if (boss.wasInterrupted()) return;    
 
     for (size_t n = 0, N = mesher.polygonPoolListSize(); n < N; ++n) {
 
@@ -276,6 +500,95 @@ copyMesh(
             }
         }
     }
+
+#else // 12.5.245 or later
+
+    GA_Size npoints = mesher.pointListSize();
+    const GA_Offset startpt = detail.appendPointBlock(npoints);
+    UT_ASSERT_COMPILETIME(sizeof(openvdb::tools::PointList::element_type) == sizeof(UT_Vector3));
+    GA_RWHandleV3 pthandle(detail.getP());
+    pthandle.setBlock(startpt, npoints, (UT_Vector3 *)points.get());
+
+    // index 0 --> interior, not on seam
+    // index 1 --> interior, on seam
+    // index 2 --> surface,  not on seam
+    // index 3 --> surface,  on seam
+    GA_Size nquads[4] = {0, 0, 0, 0};
+    GA_Size ntris[4]  = {0, 0, 0, 0};
+    for (size_t n = 0, N = mesher.polygonPoolListSize(); n < N; ++n) {
+        const openvdb::tools::PolygonPool& polygons = polygonPoolList[n];
+        for (size_t i = 0, I = polygons.numQuads(); i < I; ++i) {
+            int flags = (((polygons.quadFlags(i) & exteriorFlag)!=0) << 1)
+                       | ((polygons.quadFlags(i) & seamLineFlag)!=0);
+            ++nquads[flags];
+        }
+        for (size_t i = 0, I = polygons.numTriangles(); i < I; ++i) {
+            int flags = (((polygons.triangleFlags(i) & exteriorFlag)!=0) << 1)
+                       | ((polygons.triangleFlags(i) & seamLineFlag)!=0);
+            ++ntris[flags];
+        }
+    }
+
+    GA_Size nverts[4] = {
+        nquads[0]*4 + ntris[0]*3,
+        nquads[1]*4 + ntris[1]*3,
+        nquads[2]*4 + ntris[2]*3,
+        nquads[3]*4 + ntris[3]*3
+    };
+    UT_IntArray verts[4];
+    for (int flags = 0; flags < 4; ++flags) {
+        verts[flags].resize(nverts[flags]);
+        verts[flags].entries(nverts[flags]);
+    }
+
+    GA_Size iquad[4] = {0, 0, 0, 0};
+    GA_Size itri[4]  = {nquads[0]*4, nquads[1]*4, nquads[2]*4, nquads[3]*4};
+
+    for (size_t n = 0, N = mesher.polygonPoolListSize(); n < N; ++n) {
+        const openvdb::tools::PolygonPool& polygons = polygonPoolList[n];
+
+        // Copy quads
+        for (size_t i = 0, I = polygons.numQuads(); i < I; ++i) {
+            const openvdb::Vec4I& quad = polygons.quad(i);
+            int flags = (((polygons.quadFlags(i) & exteriorFlag)!=0) << 1)
+                       | ((polygons.quadFlags(i) & seamLineFlag)!=0);
+            verts[flags](iquad[flags]++) = quad[0];
+            verts[flags](iquad[flags]++) = quad[1];
+            verts[flags](iquad[flags]++) = quad[2];
+            verts[flags](iquad[flags]++) = quad[3];
+        }
+
+        // Copy triangles (adaptive mesh)
+        for (size_t i = 0, I = polygons.numTriangles(); i < I; ++i) {
+            const openvdb::Vec3I& triangle = polygons.triangle(i);
+            int flags = (((polygons.triangleFlags(i) & exteriorFlag)!=0) << 1)
+                       | ((polygons.triangleFlags(i) & seamLineFlag)!=0);
+            verts[flags](itri[flags]++) = triangle[0];
+            verts[flags](itri[flags]++) = triangle[1];
+            verts[flags](itri[flags]++) = triangle[2];
+        }
+    }
+
+
+    for (int flags = 0; flags < 4; ++flags) {
+        if (!nquads[flags] && !ntris[flags]) continue;
+
+        GEO_PolyCounts sizelist;
+        if (nquads[flags]) sizelist.append(4, nquads[flags]);
+        if (ntris[flags])  sizelist.append(3, ntris[flags]);
+
+        GU_ConvertMarker marker(detail);
+
+        GU_PrimPoly::buildBlock(&detail, startpt, npoints, sizelist, verts[flags].array());
+
+        GA_Range range = marker.getPrimitives();
+
+        if (seamGroup && (flags & 1))       seamGroup->addRange(range);
+        if (surfaceGroup && (flags & 2))    surfaceGroup->addRange(range);
+        if (interiorGroup && !(flags & 2))  interiorGroup->addRange(range);
+    }
+#endif // 12.5.245 or later
+
 
     // Keep VDB grid name
     const GA_Index lastPrim = detail.primitives().entries();
@@ -331,9 +644,68 @@ SOP_OpenVDB_To_Polygons::cookMySop(OP_Context& context)
         const double iso = double(evalFloat("isovalue", 0, time));
         const bool computeNormals = evalInt("computenormals", 0, time);
         const bool keepVdbName = evalInt("keepvdbname", 0, time);
+        const float maskoffset = evalFloat("surfacemaskoffset", 0, time);
+        const bool invertmask = evalInt("invertmask", 0, time);
 
         // Setup level set mesher
         openvdb::tools::VolumeToMesh mesher(iso, adaptivity);
+
+        // Check mask input
+        const GU_Detail* maskGeo = inputGeo(2);
+        if (maskGeo) {
+
+            if (evalInt("surfacemask", 0, time)) {
+                UT_String maskStr;
+                evalString(maskStr, "surfacemaskname", 0, time);
+
+                const GA_PrimitiveGroup * maskGroup =
+                    parsePrimitiveGroups(maskStr.buffer(), const_cast<GU_Detail*>(maskGeo));
+
+                if (!maskGroup && maskStr.length() > 0) {
+                    addWarning(SOP_MESSAGE, "Surface mask not found.");
+                } else {
+                    hvdb::VdbPrimCIterator maskIt(maskGeo, maskGroup);
+                    if (maskIt) {
+                        const openvdb::GridClass gridClass = maskIt->getGrid().getGridClass();
+                        if (gridClass == openvdb::GRID_LEVEL_SET) {
+
+                            openvdb::FloatGrid::ConstPtr grid =
+                                openvdb::gridConstPtrCast<openvdb::FloatGrid>(maskIt->getGridPtr());
+
+                            mesher.setSurfaceMask(
+                                openvdb::tools::sdfInteriorMask(*grid, maskoffset), invertmask);
+                        } else {
+                            addWarning(SOP_MESSAGE, "Currently only supporting level set masks.");
+                        }
+                    }
+                }
+
+            }
+
+
+            if (evalInt("adaptivityfield", 0, time)) {
+                UT_String maskStr;
+                evalString(maskStr, "adaptivityfieldname", 0, time);
+
+                const GA_PrimitiveGroup *maskGroup =
+                    matchGroup(const_cast<GU_Detail&>(*maskGeo), maskStr.toStdString());
+
+                if (!maskGroup && maskStr.length() > 0) {
+                    addWarning(SOP_MESSAGE, "Adaptivity field not found.");
+                } else {
+                    hvdb::VdbPrimCIterator maskIt(maskGeo, maskGroup);
+                    if (maskIt) {
+                        openvdb::FloatGrid::ConstPtr grid =
+                            openvdb::gridConstPtrCast<openvdb::FloatGrid>(maskIt->getGridPtr());
+
+                        mesher.setSpatialAdaptivity(grid);
+                    }
+                }
+            }
+        }
+
+        // Slicing options    
+        mesher.partition(evalInt("automaticpartitions", 0, time), evalInt("activepart", 0, time) - 1);
 
         // Check reference input
         const GU_Detail* refGeo = inputGeo(1);
@@ -432,7 +804,8 @@ SOP_OpenVDB_To_Polygons::referenceMeshing(
     const bool transferAttributes = evalInt("transferattributes", 0, time);
     const bool keepVdbName = evalInt("keepvdbname", 0, time);
     const bool smoothseams = evalInt("smoothseams", 0, time);
-    //const bool reconstruct = evalInt("reconstruct", 0, time);
+    const bool sharpenFeatures = evalInt("sharpenfeatures", 0, time);
+    const float edgetolerance = double(evalFloat("edgetolerance", 0, time));
 
     typedef typename GridType::TreeType TreeType;
     typedef typename GridType::ValueType ValueType;
@@ -451,8 +824,10 @@ SOP_OpenVDB_To_Polygons::referenceMeshing(
     const openvdb::GridClass gridClass = firstGrid->getGridClass();
 
     typename GridType::ConstPtr refGrid;
-    typedef typename openvdb::tools::MeshToVolume<GridType>::IndexGridT IndexGridT;
-    typename IndexGridT::Ptr indexGrid;
+    typedef typename openvdb::tools::MeshToVolume<GridType>::IntGridT IntGridT;
+    typename IntGridT::Ptr indexGrid; // replace
+
+    openvdb::tools::MeshToVoxelEdgeData edgeData;
 
     // Check for reference VDB
     {
@@ -504,7 +879,31 @@ SOP_OpenVDB_To_Polygons::referenceMeshing(
 
         refGrid = converter.distGridPtr();
         indexGrid = converter.indexGridPtr();
+
+        if (sharpenFeatures) edgeData.convert(pointList, primList);
     }
+
+    typedef typename TreeType::template ValueConverter<bool>::Type BoolTreeType;
+    typename BoolTreeType::Ptr maskTree;
+
+    if (sharpenFeatures) {
+        maskTree = typename BoolTreeType::Ptr(new BoolTreeType(false));    
+        maskTree->topologyUnion(indexGrid->tree());
+        openvdb::tree::LeafManager<BoolTreeType> maskLeafs(*maskTree);
+
+        GenAdaptivityMaskOp<typename IntGridT::TreeType, BoolTreeType>
+            op(*refGeo, indexGrid->tree(), maskLeafs, edgetolerance);
+        op.run();
+
+        maskTree->pruneInactive();
+
+        openvdb::tools::dilateVoxels(*maskTree, 2);
+
+        mesher.setAdaptivityMask(maskTree);
+    }
+
+
+
 
     if (boss.wasInterrupted()) return;
 
@@ -567,12 +966,11 @@ SOP_OpenVDB_To_Polygons::referenceMeshing(
 
     grids.clear();
 
-    // Reconstruct sharp fetures
-    /*if (!boss.wasInterrupted() && reconstruct) {
+    // Sharpen Features
+    if (!boss.wasInterrupted() && sharpenFeatures) { 
         UTparallelFor(GA_SplittableRange(gdp->getPointRange()),
-            SharpFeatureOp<IndexGridT>(*refGeo, *gdp, *indexGrid, surfaceGroup));
-    }*/
-
+            hvdb::SharpenFeaturesOp(*gdp, *refGeo, edgeData, *transform, surfaceGroup, maskTree.get()));
+    }
 
     // Compute vertex normals
     if (!boss.wasInterrupted() && computeNormals) {
@@ -586,10 +984,11 @@ SOP_OpenVDB_To_Polygons::referenceMeshing(
         }
     }
 
-    // Transfer Primitive Attributes
+    // Transfer primitive attributes
     if (!boss.wasInterrupted() && transferAttributes && refGeo && indexGrid) {
         hvdb::transferPrimitiveAttributes(*refGeo, *gdp, *indexGrid, boss, surfaceGroup);
     }
+
 
     if (!badTransformList.empty()) {
         std::string s = "The following grids were skipped: '" +
