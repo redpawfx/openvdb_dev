@@ -35,6 +35,7 @@
 #   pdfdoc              PDF documentation (doc/latex/refman.pdf;
 #                       requires LaTeX and ghostscript)
 #   vdb_print           command-line tool to inspect OpenVDB files
+#   vdb_render          command-line tool to ray-trace OpenVDB files
 #   vdb_view            command-line tool to view OpenVDB files
 #   vdb_test            unit tests for the OpenVDB library
 #
@@ -71,10 +72,16 @@ INSTALL_DIR := ./RELEASE/OpenVDB
 # The parent directory of the boost/ header directory
 BOOST_INCL_DIR := $(HT)/include
 
+# The parent directory of the OpenEXR/ header directory
+EXR_INCL_DIR := $(HT)/include
+# The directory containing libIlmImf, libIlmThread, etc.
+EXR_LIB_DIR := $(HDSO)
+EXR_LIB := -lIlmImf -lIlmThread -lIex -lImath
+
 # The parent directory of the OpenEXR/ header directory (which contains half.h)
-HALF_INCL_DIR := $(HT)/include
+HALF_INCL_DIR := $(EXR_INCL_DIR)
 # The directory containing libHalf
-HALF_LIB_DIR := $(HDSO)
+HALF_LIB_DIR := $(EXR_LIB_DIR)
 HALF_LIB := -lHalf
 
 # The parent directory of the tbb/ header directory
@@ -193,6 +200,7 @@ INCLUDE_NAMES := \
     math/Proximity.h \
     math/QuantizedUnitVec.h \
     math/Quat.h \
+    math/Ray.h \
     math/Stats.h \
     math/Stencils.h \
     math/Transform.h\
@@ -225,9 +233,12 @@ INCLUDE_NAMES := \
     tools/ParticlesToLevelSet.h \
     tools/PointAdvect.h \
     tools/PointScatter.h \
+    tools/RayIntersector.h \
+    tools/RayTracer.h \
     tools/Statistics.h \
     tools/ValueTransformer.h \
     tools/VolumeToMesh.h \
+    tools/VolumeToSpheres.h \
     tree/InternalNode.h \
     tree/Iterator.h \
     tree/LeafManager.h \
@@ -302,10 +313,12 @@ UNITTEST_SRC_NAMES := \
     unittest/TestLeafBool.cc \
     unittest/TestLeafIO.cc \
     unittest/TestLeafOrigin.cc \
+    unittest/TestLevelSetRayIntersector.cc \
     unittest/TestLevelSetUtil.cc \
     unittest/TestLinearInterp.cc \
     unittest/TestMaps.cc \
     unittest/TestMat4Metadata.cc \
+    unittest/TestMath.cc \
     unittest/TestMeanCurvature.cc \
     unittest/TestMeshToVolume.cc \
     unittest/TestMetadata.cc \
@@ -319,6 +332,7 @@ UNITTEST_SRC_NAMES := \
     unittest/TestQuadraticInterp.cc \
     unittest/TestQuantizedUnitVec.cc \
     unittest/TestQuat.cc \
+    unittest/TestRay.cc \
     unittest/TestStats.cc \
     unittest/TestStream.cc \
     unittest/TestStringMetadata.cc \
@@ -332,6 +346,7 @@ UNITTEST_SRC_NAMES := \
     unittest/TestValueAccessor.cc \
     unittest/TestVec2Metadata.cc \
     unittest/TestVec3Metadata.cc \
+    unittest/TestVolumeRayIntersector.cc \
     unittest/TestVolumeToMesh.cc \
 #
 
@@ -369,6 +384,7 @@ CMD_INCLUDE_NAMES := \
 
 CMD_SRC_NAMES := \
     cmd/openvdb_print/main.cc \
+    cmd/openvdb_render/main.cc \
     cmd/openvdb_view/main.cc \
 #
 
@@ -399,7 +415,7 @@ LIB_MINOR_VERSION=$(shell grep 'OPENVDB_LIBRARY_MINOR_VERSION = ' \
 LIB_PATCH_VERSION=$(shell grep 'OPENVDB_LIBRARY_PATCH_VERSION = ' \
     version.h | sed 's/[^0-9]*//g')
 
-LIB_VERSION=$(LIB_MINOR_VERSION).$(LIB_PATCH_VERSION)
+LIB_VERSION=$(LIB_MAJOR_VERSION).$(LIB_MINOR_VERSION).$(LIB_PATCH_VERSION)
 
 LIBOPENVDB_NAME=libopenvdb
 LIBOPENVDB_STATIC := $(LIBOPENVDB_NAME).a
@@ -437,6 +453,7 @@ ALL_TARGETS := \
     $(LIBOPENVDB) \
     vdb_test \
     vdb_print \
+    vdb_render \
     vdb_view \
     $(DEPEND) \
     $(LIBOPENVDB_NAME).so \
@@ -450,7 +467,7 @@ ALL_TARGETS := \
 	@echo "Building $@ because of $(call list_deps)"
 	$(CXX) -c $(CXXFLAGS) -fPIC -o $@ $<
 
-all: lib vdb_print vdb_test depend
+all: lib vdb_print vdb_render vdb_test depend
 
 $(OBJ_NAMES): %.o: %.cc
 	@echo "Building $@ because of $(call list_deps)"
@@ -506,6 +523,13 @@ vdb_print: $(LIBOPENVDB) cmd/openvdb_print/main.cc
 	    $(LIBS_RPATH) $(CONCURRENT_MALLOC_LIB) \
 	    $(LIBOPENVDB_RPATH) -L$(PWD) $(LIBOPENVDB)
 
+vdb_render: $(LIBOPENVDB) cmd/openvdb_render/main.cc
+	@echo "Building $@ because of $(call list_deps)"
+	$(CXX) $(CXXFLAGS) -o $@ cmd/openvdb_render/main.cc -I . -I $(EXR_INCL_DIR) \
+	    $(LIBS_RPATH) $(CONCURRENT_MALLOC_LIB) \
+	    -Wl,-rpath,$(EXR_LIB_DIR) -L$(EXR_LIB_DIR) $(EXR_LIB) \
+	    $(LIBOPENVDB_RPATH) -L$(PWD) $(LIBOPENVDB)
+
 ifneq (3,$(words $(strip $(GLFW_LIB_DIR) $(GLFW_INCL_DIR) $(GLFW_LIB))))
 vdb_view:
 	@echo "$@"': GLFW is unavailable'
@@ -550,7 +574,7 @@ test:
 	@echo "$@"': $$(CPPUNIT_INCL_DIR) is undefined'
 endif
 
-install: lib vdb_print vdb_view doc
+install: lib vdb_print vdb_render vdb_view doc
 	mkdir -p $(INSTALL_DIR)/include/openvdb
 	@echo "Created $(INSTALL_DIR)/include/openvdb"
 	pushd $(INSTALL_DIR)/include/openvdb > /dev/null; \
@@ -572,6 +596,8 @@ install: lib vdb_print vdb_view doc
 	@echo "Created $(INSTALL_DIR)/bin/"
 	cp -f vdb_print $(INSTALL_DIR)/bin
 	@echo "Copied vdb_print to $(INSTALL_DIR)/bin/"
+	cp -f vdb_render $(INSTALL_DIR)/bin
+	@echo "Copied vdb_render to $(INSTALL_DIR)/bin/"
 	if [ -f vdb_view ]; \
 	then \
 	    cp -f vdb_view $(INSTALL_DIR)/bin; \

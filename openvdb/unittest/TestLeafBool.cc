@@ -31,6 +31,7 @@
 #include <set>
 #include <cppunit/extensions/HelperMacros.h>
 #include <openvdb/openvdb.h>
+#include <openvdb/Types.h>
 #include <openvdb/tools/Filter.h>
 #include <openvdb/util/logging.h>
 #include "util.h" // for unittest_util::makeSphere()
@@ -89,13 +90,13 @@ TestLeafBool::testGetValue()
     {
         LeafType leaf(openvdb::Coord(0, 0, 0), /*background=*/false);
         for (openvdb::Index n = 0; n < leaf.numValues(); ++n) {
-            CPPUNIT_ASSERT_EQUAL(false, leaf.getValue(leaf.offset2coord(n)));
+            CPPUNIT_ASSERT_EQUAL(false, leaf.getValue(leaf.offsetToLocalCoord(n)));
         }
     }
     {
         LeafType leaf(openvdb::Coord(0, 0, 0), /*background=*/true);
         for (openvdb::Index n = 0; n < leaf.numValues(); ++n) {
-            CPPUNIT_ASSERT_EQUAL(true, leaf.getValue(leaf.offset2coord(n)));
+            CPPUNIT_ASSERT_EQUAL(true, leaf.getValue(leaf.offsetToLocalCoord(n)));
         }
     }
 }
@@ -185,7 +186,7 @@ TestLeafBool::testIteratorGetCoord()
 
     LeafType leaf(openvdb::Coord(8, 8, 0));
 
-    CPPUNIT_ASSERT_EQUAL(Coord(8, 8, 0), leaf.getOrigin());
+    CPPUNIT_ASSERT_EQUAL(Coord(8, 8, 0), leaf.origin());
 
     leaf.setValueOn(Coord(1, 2, 3), -3);
     leaf.setValueOn(Coord(5, 2, 3),  4);
@@ -254,35 +255,35 @@ TestLeafBool::testGetOrigin()
 {
     {
         LeafType leaf(openvdb::Coord(1, 0, 0), 1);
-        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(0, 0, 0), leaf.getOrigin());
+        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(0, 0, 0), leaf.origin());
     }
     {
         LeafType leaf(openvdb::Coord(0, 0, 0), 1);
-        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(0, 0, 0), leaf.getOrigin());
+        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(0, 0, 0), leaf.origin());
     }
     {
         LeafType leaf(openvdb::Coord(8, 0, 0), 1);
-        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(8, 0, 0), leaf.getOrigin());
+        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(8, 0, 0), leaf.origin());
     }
     {
         LeafType leaf(openvdb::Coord(8, 1, 0), 1);
-        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(8, 0, 0), leaf.getOrigin());
+        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(8, 0, 0), leaf.origin());
     }
     {
         LeafType leaf(openvdb::Coord(1024, 1, 3), 1);
-        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(128*8, 0, 0), leaf.getOrigin());
+        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(128*8, 0, 0), leaf.origin());
     }
     {
         LeafType leaf(openvdb::Coord(1023, 1, 3), 1);
-        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(127*8, 0, 0), leaf.getOrigin());
+        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(127*8, 0, 0), leaf.origin());
     }
     {
         LeafType leaf(openvdb::Coord(512, 512, 512), 1);
-        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(512, 512, 512), leaf.getOrigin());
+        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(512, 512, 512), leaf.origin());
     }
     {
         LeafType leaf(openvdb::Coord(2, 52, 515), 1);
-        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(0, 48, 512), leaf.getOrigin());
+        CPPUNIT_ASSERT_EQUAL(openvdb::Coord(0, 48, 512), leaf.origin());
     }
 }
 
@@ -294,7 +295,7 @@ TestLeafBool::testNegativeIndexing()
 
     LeafType leaf(openvdb::Coord(-9, -2, -8));
 
-    CPPUNIT_ASSERT_EQUAL(Coord(-16, -8, -8), leaf.getOrigin());
+    CPPUNIT_ASSERT_EQUAL(Coord(-16, -8, -8), leaf.origin());
 
     leaf.setValueOn(Coord(1, 2, 3));
     leaf.setValueOn(Coord(5, 2, 3));
@@ -316,7 +317,7 @@ void
 TestLeafBool::testIO()
 {
     LeafType leaf(openvdb::Coord(1, 3, 5));
-    const openvdb::Coord origin = leaf.getOrigin();
+    const openvdb::Coord origin = leaf.origin();
 
     leaf.setValueOn(openvdb::Coord(0, 1, 0));
     leaf.setValueOn(openvdb::Coord(1, 0, 0));
@@ -335,7 +336,7 @@ TestLeafBool::testIO()
 
     leaf.readBuffers(istr);
 
-    CPPUNIT_ASSERT_EQUAL(origin, leaf.getOrigin());
+    CPPUNIT_ASSERT_EQUAL(origin, leaf.origin());
 
     CPPUNIT_ASSERT(leaf.isValueOn(openvdb::Coord(0, 1, 0)));
     CPPUNIT_ASSERT(leaf.isValueOn(openvdb::Coord(1, 0, 0)));
@@ -355,7 +356,7 @@ TestLeafBool::testTopologyCopy()
     FloatLeafType fleaf(Coord(10, 20, 30), /*background=*/-1.0);
     std::set<Coord> coords;
     for (openvdb::Index n = 0; n < fleaf.numValues(); n += 10) {
-        Coord xyz = fleaf.offset2globalCoord(n);
+        Coord xyz = fleaf.offsetToGlobalCoord(n);
         fleaf.setValueOn(xyz, n);
         coords.insert(xyz);
     }
@@ -391,7 +392,7 @@ TestLeafBool::testMerge()
     val = active = false;
     CPPUNIT_ASSERT(!leaf2.isConstant(val, active));
 
-    leaf.merge(leaf2);
+    leaf.merge<openvdb::MERGE_ACTIVE_STATES>(leaf2);
     CPPUNIT_ASSERT(leaf.isValueMaskOn());
     CPPUNIT_ASSERT(!leaf.isValueMaskOff());
     val = active = false;

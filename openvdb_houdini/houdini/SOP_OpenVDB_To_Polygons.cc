@@ -170,7 +170,7 @@ newSopOperator(OP_OperatorTable* table)
 
     parms.add(hutil::ParmFactory(PRM_INT_J, "automaticpartitions", "Automatic Partitions")
         .setRange(PRM_RANGE_RESTRICTED, 1, PRM_RANGE_UI, 20)
-        .setHelpText("Subdivide volume and mesh into disjoint parts. (In development)")
+        .setHelpText("Subdivide volume and mesh into disjoint parts.")
         .setDefault(PRMoneDefaults)
         .setCallbackFunc(&checkActivePartCB));
 
@@ -195,11 +195,6 @@ newSopOperator(OP_OperatorTable* table)
             "reference surface. Will override computed vertex normals for primitives "
             " in the surface group."));
 
-    parms.add(hutil::ParmFactory(PRM_TOGGLE, "smoothseams", "Smooth Seams")
-        .setDefault(PRMoneDefaults)
-        .setHelpText("Smooth seam line edges during mesh extraction, "
-            "removes staircase artifacts"));
-
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "sharpenfeatures", "Sharpen Features")
         .setDefault(PRMoneDefaults)
         .setHelpText("Sharpen edges and corners."));
@@ -207,7 +202,7 @@ newSopOperator(OP_OperatorTable* table)
     parms.add(hutil::ParmFactory(PRM_FLT_J, "edgetolerance", "Edge Tolerance")
         .setDefault(0.5)
         .setRange(PRM_RANGE_RESTRICTED, 0.0, PRM_RANGE_RESTRICTED, 1.0)
-        .setHelpText("Controls the edge adaptivity mask. (This is a temporary/experimental setting)"));
+        .setHelpText("Controls the edge adaptivity mask."));
 
     parms.add(hutil::ParmFactory(PRM_STRING, "surfacegroup", "Surface Group")
         .setDefault("surface_polygons")
@@ -264,9 +259,11 @@ newSopOperator(OP_OperatorTable* table)
 
 
     //////////
-
+    hutil::ParmList obsoleteParms;
+    obsoleteParms.add(hutil::ParmFactory(PRM_TOGGLE, "smoothseams", "Smooth Seams"));
 
     hvdb::OpenVDBOpFactory("OpenVDB To Polygons", SOP_OpenVDB_To_Polygons::factory, parms, *table)
+        .setObsoleteParms(obsoleteParms)
         .addInput("OpenVDB grids to surface")
         .addOptionalInput("Optional reference surface. Can be used "
             "to transfer attributes, sharpen features and to "
@@ -302,7 +299,6 @@ SOP_OpenVDB_To_Polygons::disableParms()
     changed += enableParm("interiorgroup", refexists);
     changed += enableParm("seamlinegroup", refexists);
     changed += enableParm("transferattributes", refexists);
-    changed += enableParm("smoothseams", refexists);
     changed += enableParm("sharpenfeatures", refexists);
     changed += enableParm("edgetolerance", refexists);
 
@@ -324,103 +320,6 @@ SOP_OpenVDB_To_Polygons::disableParms()
  
     return changed;
 }
-
-
-////////////////////////////////////////
-
-
-/// @brief  TBB body object for threaded sharp feature construction.
-template <typename IndexTreeType, typename BoolTreeType>
-class GenAdaptivityMaskOp
-{
-public:
-    typedef openvdb::tree::LeafManager<BoolTreeType> BoolLeafManager;
-
-    GenAdaptivityMaskOp(const GU_Detail& refGeo,
-        const IndexTreeType& indexTree, BoolLeafManager& leafs, float edgetolerance = 0.0);
-
-    void run(bool threaded = true);
-
-    void operator()(const tbb::blocked_range<size_t> &range) const;
-
-private:
-    const GU_Detail& mRefGeo;
-    const IndexTreeType& mIndexTree;
-    BoolLeafManager& mLeafs;
-    float mEdgeTolerance;
-};
-
-
-template <typename IndexTreeType, typename BoolTreeType>
-GenAdaptivityMaskOp<IndexTreeType, BoolTreeType>::GenAdaptivityMaskOp(const GU_Detail& refGeo,
-    const IndexTreeType& indexTree, BoolLeafManager& leafs, float edgetolerance)
-    : mRefGeo(refGeo)
-    , mIndexTree(indexTree)
-    , mLeafs(leafs)
-    , mEdgeTolerance(edgetolerance)
-{
-    mEdgeTolerance = std::max(0.0f, mEdgeTolerance);
-    mEdgeTolerance = std::min(1.0f, mEdgeTolerance);
-}
-
-
-template <typename IndexTreeType, typename BoolTreeType>
-void
-GenAdaptivityMaskOp<IndexTreeType, BoolTreeType>::run(bool threaded)
-{
-    if (threaded) {
-        tbb::parallel_for(mLeafs.getRange(), *this);
-    } else {
-        (*this)(mLeafs.getRange());
-    }
-}
-
-
-template <typename IndexTreeType, typename BoolTreeType>
-void
-GenAdaptivityMaskOp<IndexTreeType, BoolTreeType>::operator()(const tbb::blocked_range<size_t> &range) const
-{
-    typedef typename openvdb::tree::ValueAccessor<const IndexTreeType> IndexAccessorType;
-    IndexAccessorType idxAcc(mIndexTree);
-
-    UT_Vector3 tmpN, normal;
-    GA_Offset primOffset;
-    int tmpIdx;
-
-    openvdb::Coord ijk, nijk;
-    typename BoolTreeType::LeafNodeType::ValueOnIter iter;
-
-    for (size_t n = range.begin(); n < range.end(); ++n) {
-        iter = mLeafs.leaf(n).beginValueOn();
-        for (; iter; ++iter) {
-            ijk = iter.getCoord();
-            
-            bool edgeVoxel = false;
-
-            int idx = idxAcc.getValue(ijk);
-
-            primOffset = mRefGeo.primitiveOffset(idx);
-            normal = mRefGeo.getGEOPrimitive(primOffset)->computeNormal();
-
-            for (size_t i = 0; i < 18; ++i) {
-                nijk = ijk + openvdb::util::COORD_OFFSETS[i];
-                if (idxAcc.probeValue(nijk, tmpIdx) && tmpIdx != idx) {
-                    primOffset = mRefGeo.primitiveOffset(tmpIdx);
-                    tmpN = mRefGeo.getGEOPrimitive(primOffset)->computeNormal();
-
-                    if (normal.dot(tmpN) < mEdgeTolerance) {
-                        edgeVoxel = true;
-                        break;
-                    }
-                }
-            }
-
-            if (!edgeVoxel) iter.setValueOff();
-        }
-    }
-}
-
-
 
 
 ////////////////////////////////////////
@@ -704,9 +603,7 @@ SOP_OpenVDB_To_Polygons::cookMySop(OP_Context& context)
             }
         }
 
-        // Slicing options    
-        mesher.partition(evalInt("automaticpartitions", 0, time), evalInt("activepart", 0, time) - 1);
-
+       
         // Check reference input
         const GU_Detail* refGeo = inputGeo(1);
         if (refGeo) {
@@ -803,9 +700,8 @@ SOP_OpenVDB_To_Polygons::referenceMeshing(
     const bool computeNormals = evalInt("computenormals", 0, time);
     const bool transferAttributes = evalInt("transferattributes", 0, time);
     const bool keepVdbName = evalInt("keepvdbname", 0, time);
-    const bool smoothseams = evalInt("smoothseams", 0, time);
     const bool sharpenFeatures = evalInt("sharpenfeatures", 0, time);
-    const float edgetolerance = double(evalFloat("edgetolerance", 0, time));
+    const double edgetolerance = double(evalFloat("edgetolerance", 0, time));
 
     typedef typename GridType::TreeType TreeType;
     typedef typename GridType::ValueType ValueType;
@@ -883,6 +779,10 @@ SOP_OpenVDB_To_Polygons::referenceMeshing(
         if (sharpenFeatures) edgeData.convert(pointList, primList);
     }
 
+
+    if (boss.wasInterrupted()) return;
+
+
     typedef typename TreeType::template ValueConverter<bool>::Type BoolTreeType;
     typename BoolTreeType::Ptr maskTree;
 
@@ -891,7 +791,7 @@ SOP_OpenVDB_To_Polygons::referenceMeshing(
         maskTree->topologyUnion(indexGrid->tree());
         openvdb::tree::LeafManager<BoolTreeType> maskLeafs(*maskTree);
 
-        GenAdaptivityMaskOp<typename IntGridT::TreeType, BoolTreeType>
+        hvdb::GenAdaptivityMaskOp<typename IntGridT::TreeType, BoolTreeType>
             op(*refGeo, indexGrid->tree(), maskLeafs, edgetolerance);
         op.run();
 
@@ -903,12 +803,11 @@ SOP_OpenVDB_To_Polygons::referenceMeshing(
     }
 
 
-
-
     if (boss.wasInterrupted()) return;
 
+
     const double iadaptivity = double(evalFloat("internaladaptivity", 0, time));
-    mesher.setRefGrid(refGrid, iadaptivity, smoothseams);
+    mesher.setRefGrid(refGrid, iadaptivity);
 
 
     std::list<openvdb::GridBase::Ptr>::iterator it = grids.begin();
@@ -969,7 +868,7 @@ SOP_OpenVDB_To_Polygons::referenceMeshing(
     // Sharpen Features
     if (!boss.wasInterrupted() && sharpenFeatures) { 
         UTparallelFor(GA_SplittableRange(gdp->getPointRange()),
-            hvdb::SharpenFeaturesOp(*gdp, *refGeo, edgeData, *transform, surfaceGroup, maskTree.get()));
+            hvdb::SharpenFeaturesOp(*gdp, *refGeo, edgeData, *transform, surfaceGroup));
     }
 
     // Compute vertex normals

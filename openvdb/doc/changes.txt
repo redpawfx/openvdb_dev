@@ -3,26 +3,161 @@
 @page changes Release Notes
 
 
+@htmlonly <a name="v2_0_0_changes"></a>@endhtmlonly
+@par
+<B>Version 2.0.0</B> - <I>In development</I>
+- Added a @vdblink::tools::LevelSetRayIntersector
+  level set ray intersector@endlink tool for efficient, hierarchical
+  intersection of rays with level sets.
+- Added a @vdblink::tools::VolumeRayIntersector
+  volume ray intersector@endlink tool for efficient, hierarchical
+  intersection of rays with generic (e.g. density) volumes.
+- Added a @vdblink::math::Ray Ray@endlink class and a hierarchical
+  @vdblink::math::DDA Digital Differential Analyzer@endlink for fast
+  ray traversal.
+- Added a fully multi-threaded @vdblink::tools::LevelSetRayTracer 
+  level set ray tracer@endlink and
+  @vdblink::tools::PerspectiveCamera camera@endlink
+  @vdblink::tools::OrthographicCamera classes@endlink
+  that mimic Houdini&rsquo;s cameras.
+- Added a simple, command-line renderer (currently for level sets only.)
+- Implemented a new meshing scheme that produces topologically robust
+  two-manifold meshes and is twice as fast as the previous scheme.
+- Improved performance of @vdblink::tree::Tree::evalLeafBoundingBox
+  Tree::evalLeafBoundingBox@endlink by 30x and
+  @vdblink::tree::Tree::evalActiveVoxelBoundingBox 
+  Tree::evalActiveVoxelBoundingBox@endlink by 2x.
+- Added a tool (and a Houdini SOP) that fills a volume with
+  adaptively-sized overlapping or non-overlapping spheres.
+- Added a Houdini Ray SOP that can be used to perform geometry projections
+  using level set ray intersections or closest point queries.
+- Added a tool that performs accelerated closest surface point queries on
+  narrow band level sets. Supports queries that originate at arbitrary
+  worldspace locations.
+- Increased the speed of masked level set filtering by 20% for
+  the most common cases.
+- Added @vdblink::math::BoxStencil math::BoxStencil@endlink, with support
+  for trilinear interpolation and gradient computation.
+- Added @vdblink::math::MinIndex() math::MinIndex@endlink and 
+  @vdblink::math::MaxIndex() math::MaxIndex@endlink, which find the minimum
+  and maximum components of a vector without any branching.
+- Added @vdblink::math::BBox::minExtent() BBox::minExtent@endlink,
+  which returns a bounding box&rsquo;s shortest axis.
+- The default @vdblink::math::BBox BBox@endlink constructor now
+  generates an invalid bounding box rather than an empty bounding box
+  positioned at the origin.  The new behavior is consistent with
+  @vdblink::math::CoordBBox CoordBBox@endlink.
+  <I>[Thanks to Rick Hankins for suggesting this fix.]</I>
+- Added @vdblink::math::CoordBBox::reset() CoordBBox::reset()@endlink
+  to reset the bbox its initial value, i.e. an invalid bounding box.
+- Fixed a bug in the default @vdblink::math::ScaleMap ScaleMap@endlink
+  constructor that left some data used in the inverse uninitialized.
+- Added @vdblink::math::MapBase::applyJT MapBase::applyJT@endlink, which
+  applies the Jacobian transpose to a vector (the Jacobian transpose takes
+  a range-space vector to a domain-space vector, e.g., world to index),
+  and added @vdblink::math::MapBase::inverseMap() MapBase::inverseMap@endlink,
+  which returns a new map representing the inverse of the original map
+  (except for @vdblink::math::NonlinearFrustumMap NonlinearFrustumMap@endlink,
+  which does not currently have a defined inverse map).
+  <br>Note: Houdini 12.5 uses an earlier version of OpenVDB, and maps
+  created with that version lack virtual table entries for these
+  new methods, so do not call these methods from Houdini&nbsp;12.5.
+- Reimplemented @vdblink::math::RandomInt math::RandomInt@endlink using
+  Boost.Random instead of @c rand() (which is not thread-safe), and deprecated
+  @vdblink::math::randUniform math::randUniform@endlink and added
+  @vdblink::math::Random01 math::Random01@endlink to replace it. 
+- Fixed bugs in @vdblink::tools::CopyFromDense tools::CopyFromDense@endlink.
+- Fixed bugs in @vdblink::math::Stats math::Stats@endlink and
+  @vdblink::math::Histogram math::Histogram@endlink that could produce
+  <TT>NaN</TT>s or other incorrect behavior if certain methods were called
+  on populations of size zero.
+- Renamed <TT>struct tolerance</TT> to
+  @vdblink::math::Tolerance math::Tolerance@endlink
+  and @c negative to @vdblink::math::negative() math::negative@endlink
+  and removed @c math::toleranceValue().
+- Implemented a closest point on line segment algorithm,
+  @vdblink::math::closestPointOnSegmentToPoint()
+  math::closestPointOnSegmentToPoint@endlink.
+- Fixed meshing issues relating to masking and automatic partitioning.
+- @vdblink::Grid::merge() Grid::merge@endlink and
+  @vdblink::tree::Tree::merge() Tree::merge@endlink now accept an optional
+  @vdblink::MergePolicy MergePolicy@endlink argument that specifies one of
+  three new merging schemes.  (The old merging scheme, which is no longer
+  available, used logic for each tree level that was inconsistent with
+  the other levels and that could result in active tiles being replaced
+  with nodes having only inactive values.)
+- Renamed @c LeafNode::coord2offset(), @c LeafNode::offset2coord() and
+  @c LeafNode::offset2globalCoord() to
+  @vdblink::tree::LeafNode::coordToOffset() coordToOffset@endlink,
+  @vdblink::tree::LeafNode::offsetToLocalCoord() offsetToLocalCoord@endlink,
+  and @vdblink::tree::LeafNode::offsetToGlobalCoord()
+  offsetToGlobalCoord@endlink, respectively, and likewise for
+  @vdblink::tree::InternalNode::offsetToGlobalCoord() InternalNode@endlink.
+- Replaced @vdblink::tree::Tree Tree@endlink methods @c setValueOnMin,
+  @c setValueOnMax and @c setValueOnSum with
+  @vdblink::tools::setValueOnMin() tools::setValueOnMin@endlink,
+  @vdblink::tools::setValueOnMax() tools::setValueOnMax@endlink and
+  @vdblink::tools::setValueOnSum() tools::setValueOnSum@endlink
+  (and a new @vdblink::tools::setValueOnMult() tools::setValueOnMult@endlink)
+  and added @vdblink::tree::Tree::modifyValue() Tree::modifyValue@endlink
+  and @vdblink::tree::Tree::modifyValueAndActiveState()
+  Tree::modifyValueAndActiveState@endlink, which modify voxel values
+  in-place via user-supplied functors.  Similarly, replaced
+  @c ValueAccessor::setValueOnSum() with
+  @vdblink::tree::ValueAccessor::modifyValue()
+  ValueAccessor::modifyValue@endlink
+  and @vdblink::tree::ValueAccessor::modifyValueAndActiveState()
+  ValueAccessor::modifyValueAndActiveState@endlink, and added a
+  @vdblink::tree::TreeValueIteratorBase::modifyValue() modifyValue@endlink
+  method to all value iterators.
+- Removed @c LeafNode::addValue and @c LeafNode::scaleValue.
+- Added convenience classes @vdblink::tree::Tree3 tree::Tree3@endlink and
+  @vdblink::tree::Tree5 tree::Tree5@endlink for custom tree configurations.
+- Added an option to the From Particles SOP to generate an alpha mask,
+  which can be used to constrain level set filtering so as to preserve
+  surface details.
+- The mesh to volume converter now handles point-degenerate polygons.
+- Fixed a bug in the Level Set Smooth, Level Set Renormalize and 
+  Level Set Offset SOPs that caused the group name to be ignored. 
+- Fixed various OS X and Windows build issues.
+  <I>[Contributions from SESI and DD]</I>
+
+
 @htmlonly <a name="v1_2_0_changes"></a>@endhtmlonly
 @par
-<B>Version 1.2.0</B> - <I>In development</I>
-- Added options for alpha-masking in the level set filters.
-- Implemented sharp feature extraction for level set surfacing.  This enhances
-  the quality of the output mesh and reduces aliasing artifacts.
-- Added masking options, a spatial multiplier for the adaptivity threshold
-  and automatic partitioning to the meshing tools.
-- Edges and corners can now be preserved when mesh adaptivity is applied.
-- The attribute transferring scheme now takes the surface orientation into
-  account, which improves the accuracy in proximity to edges and corners.
-- Added a utility method tools::LeafManager::transformLeafs that applies a
-  user-supplied functor to each leaf node in parallel.
+<B>Version 1.2.0</B> - <I>June 28 2013</I>
+- @vdblink::tools::LevelSetFilter Level set filters@endlink now accept
+  an optional alpha mask grid.
+- Implemented sharp feature extraction for level set surfacing.
+  This enhances the quality of the output mesh and reduces aliasing
+  artifacts.
+- Added masking options to the meshing tools, as well as a spatial
+  multiplier for the adaptivity threshold, automatic partitioning,
+  and the ability to preserve edges and corners when mesh adaptivity
+  is applied.
+- The mesh to volume attribute transfer scheme now takes surface
+  orientation into account, which improves accuracy in proximity to
+  edges and corners.
+- Added a @vdblink::tree::LeafManager::foreach() foreach@endlink method
+  to @vdblink::tree::LeafManager tree::LeafManager@endlink that, like
+  @vdblink::tools::foreach() tools::foreach@endlink, applies a user-supplied
+  functor to each leaf node in parallel.
 - Rewrote the particle to level set converter, simplifying the API,
   improving performance (especially when particles have a fixed radius),
   adding the capability to transfer arbitrary point attributes,
   and fixing a velocity trail bug.
+- Added utility methods @vdblink::math::Sign() Sign@endlink,
+  @vdblink::math::SignChange() SignChange@endlink,
+  @vdblink::math::isApproxZero() isApproxZero@endlink,
+  @vdblink::math::Cbrt() Cbrt@endlink and
+  @vdblink::math::ZeroCrossing() ZeroCrossing@endlink to math/Math.h.
+- Added a @vdblink::tree::ValueAccessor3::probeNode() probeNode@endlink method
+  to the value accessor and to tree nodes that returns a pointer to the node
+  that contains a given voxel.
+- Deprecated @c LeafNode::addValue and @c LeafNode::scaleValue.
 - Doubled the speed of the mesh to volume converter (which also improves
-  the performance of the fracture and level set rebuild tools) and improved
-  its inside/outside voxel classification near edges and corners.
+  the performance of the fracture and level set rebuild tools) and
+  improved its inside/outside voxel classification near edges and corners.
 - @vdblink::tools::GridSampler GridSampler@endlink now accepts either a grid,
   a tree or a value accessor, and it offers faster index-based access methods
   and much better performance in cases where many instances are allocated.
@@ -31,11 +166,12 @@
 - Fixed a crash in @vdblink::io::Archive io::Archive@endlink whenever
   the library was unloaded from memory and then reloaded.
   <I>[Contributed by Ollie Harding]</I>
-- Added a Prune SOP with several pruning schemes.
 - Fixed a bug in @c GU_PrimVDB::buildFromPrimVolume(), seen during the
   conversion from Houdini volumes to OpenVDB grids, that could cause 
   signed flood fill to be applied to non-level set grids, resulting in
   active tiles with incorrect values.
+- Added a Prune SOP with several pruning schemes.
+
 
 @htmlonly <a name="v1_1_1_changes"></a>@endhtmlonly
 @par

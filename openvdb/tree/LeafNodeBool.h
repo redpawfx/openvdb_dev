@@ -168,32 +168,36 @@ public:
 
     /// Return the memory in bytes occupied by this node.
     Index64 memUsage() const;
-
-    /// Expand the specified bbox so it includes the active voxels of
-    /// this leaf node.
-    void evalActiveVoxelBoundingBox(CoordBBox& bbox) const;
+    
+    /// Expand the given bounding box so that it includes this leaf node's active voxels.
+    /// If visitVoxels is false this LeafNode will be approximated as dense, i.e. with all 
+    /// voxels active. Else the individual active voxels are visited to produce a tight bbox.
+    void evalActiveBoundingBox(CoordBBox&, bool visitVoxels = true) const;
+    OPENVDB_DEPRECATED void evalActiveVoxelBoundingBox(CoordBBox& bbox) const;
 
     /// @brief Return the bounding box of this node, i.e., the full index space
     /// spanned by this leaf node.
     CoordBBox getNodeBoundingBox() const { return CoordBBox::createCube(mOrigin, DIM); }
 
     /// Set the grid index coordinates of this node's local origin.
-    void setOrigin(const Coord& origin)  { mOrigin = origin; }
+    void setOrigin(const Coord& origin) { mOrigin = origin; }
+    /// @brief Return the grid index coordinates of this node's local origin.
+    /// @deprecated Use origin() instead.
+    OPENVDB_DEPRECATED const Coord& getOrigin() const { return mOrigin; }
     //@{
-    /// Get the grid index coordinates of this node's local origin.
+    /// Return the grid index coordinates of this node's local origin.
     const Coord& origin() const { return mOrigin; }
-    const Coord& getOrigin() const { return mOrigin; }
     void getOrigin(Coord& origin) const { origin = mOrigin; }
     void getOrigin(Int32& x, Int32& y, Int32& z) const { mOrigin.asXYZ(x, y, z); }
     //@}
 
-    /// Return the linear table offset of the given coordinates.
-    static Index coord2offset(const Coord& xyz);
+    /// Return the linear table offset of the given global or local coordinates.
+    static Index coordToOffset(const Coord& xyz);
     /// @brief Return the local coordinates for a linear table offset,
     /// where offset 0 has coordinates (0, 0, 0).
-    static Coord offset2coord(Index n);
+    static Coord offsetToLocalCoord(Index n);
     /// Return the global coordinates for a linear table offset.
-    Coord offset2globalCoord(Index n) const;
+    Coord offsetToGlobalCoord(Index n) const;
 
     /// Return a string representation of this node.
     std::string str() const;
@@ -245,70 +249,70 @@ public:
     /// Return the level (0) at which leaf node values reside.
     static Index getValueLevel(const Coord&) { return LEVEL; }
 
-    /// Set the active state at the given coordinates, but don't change its value.
+    /// Set the active state of the voxel at the given coordinates but don't change its value.
     void setActiveState(const Coord& xyz, bool on);
+    /// Set the active state of the voxel at the given offset but don't change its value.
+    void setActiveState(Index offset, bool on) { assert(offset<SIZE); mValueMask.set(offset, on); }
 
-    /// Mark the voxel at the given coordinates as inactive, but don't change its value.
-    void setValueOff(const Coord& xyz) { mValueMask.setOff(this->coord2offset(xyz)); }
-    /// Mark the voxel at the given offset as inactive, but don't change its value.
-    void setValueOff(Index offset) { assert(offset < SIZE); mValueMask.setOff(offset); }
-    /// Change the value of the voxel at the given coordinates and mark the voxel as inactive.
-    void setValueOff(const Coord& xyz, bool val);
-
-    /// Mark the voxel at the given coordinates as active, but don't change its value.
-    void setValueOn(const Coord& xyz) { mValueMask.setOn(this->coord2offset(xyz)); }
-    /// Mark the voxel at the given offset as active, but don't change its value.
-    void setValueOn(Index offset) { assert(offset < SIZE); mValueMask.setOn(offset); }
-    /// Change the value of the voxel at the given coordinates and mark the voxel as active.
-    void setValueOn(const Coord& xyz, bool val);
-    /// Identical to setValueOn
-    void setValue(const Coord& xyz, bool val) { this->setValueOn(xyz, val); };
-
-    /// @brief Set the value of the voxel at the given coordinates to the minimum
-    /// of its current value and the given value, and mark the voxel as active.
-    void setValueOnMin(const Coord& xyz, bool val);
-    /// @brief Set the value of the voxel at the given coordinates to the maximum
-    /// of its current value and the given value, and mark the voxel as active.
-    void setValueOnMax(const Coord& xyz, bool val);
-    /// @brief Set the value of the voxel at the given coordinates to the sum
-    /// of its current value and the given value, and mark the voxel as active.
-    void setValueOnSum(const Coord& xyz, bool val);
-
-    /// @brief Change the value of the voxel at the given coordinates without altering
-    /// the voxel's active state.
-    void setValueOnly(const Coord& xyz, bool val) {
-        this->setValueOnly(LeafNode::coord2offset(xyz), val);
-    }
-    /// @brief Change the value of the voxel at the given offset without altering
-    /// the voxel's active state.
+    /// Set the value of the voxel at the given coordinates but don't change its active state.
+    void setValueOnly(const Coord& xyz, bool val);
+    /// Set the value of the voxel at the given offset but don't change its active state.
     void setValueOnly(Index offset, bool val) { assert(offset<SIZE); mBuffer.setValue(offset,val); }
 
-    /// Add the given value to all active voxels, leaving inactive voxels unchanged.
-    OPENVDB_DEPRECATED void addValue(bool val);
-    /// Multiply all active voxels by the given value, leaving inactive voxels unchanged.
-    OPENVDB_DEPRECATED void scaleValue(bool scale);
+    /// Mark the voxel at the given coordinates as inactive but don't change its value.
+    void setValueOff(const Coord& xyz) { mValueMask.setOff(this->coordToOffset(xyz)); }
+    /// Mark the voxel at the given offset as inactive but don't change its value.
+    void setValueOff(Index offset) { assert(offset < SIZE); mValueMask.setOff(offset); }
 
-    /// Mark all voxels as active, but don't change their values.
+    /// Set the value of the voxel at the given coordinates and mark the voxel as inactive.
+    void setValueOff(const Coord& xyz, bool val);
+    /// Set the value of the voxel at the given offset and mark the voxel as inactive.
+    void setValueOff(Index offset, bool val);
+
+    /// Mark the voxel at the given coordinates as active but don't change its value.
+    void setValueOn(const Coord& xyz) { mValueMask.setOn(this->coordToOffset(xyz)); }
+    /// Mark the voxel at the given offset as active but don't change its value.
+    void setValueOn(Index offset) { assert(offset < SIZE); mValueMask.setOn(offset); }
+
+    /// Set the value of the voxel at the given coordinates and mark the voxel as active.
+    void setValueOn(const Coord& xyz, bool val);
+    /// Set the value of the voxel at the given coordinates and mark the voxel as active.
+    void setValue(const Coord& xyz, bool val) { this->setValueOn(xyz, val); };
+    /// Set the value of the voxel at the given offset and mark the voxel as active.
+    void setValueOn(Index offset, bool val);
+
+    /// @brief Apply a functor to the value of the voxel at the given offset
+    /// and mark the voxel as active.
+    template<typename ModifyOp>
+    void modifyValue(Index offset, const ModifyOp& op);
+    /// @brief Apply a functor to the value of the voxel at the given coordinates
+    /// and mark the voxel as active.
+    template<typename ModifyOp>
+    void modifyValue(const Coord& xyz, const ModifyOp& op);
+
+    /// Apply a functor to the voxel at the given coordinates.
+    template<typename ModifyOp>
+    void modifyValueAndActiveState(const Coord& xyz, const ModifyOp& op);
+
+    /// Mark all voxels as active but don't change their values.
     void setValuesOn() { mValueMask.setOn(); }
-    /// Mark all voxels as inactive, but don't change their values.
+    /// Mark all voxels as inactive but don't change their values.
     void setValuesOff() { mValueMask.setOff(); }
 
     /// Return @c true if the voxel at the given coordinates is active.
-    bool isValueOn(const Coord& xyz) const { return mValueMask.isOn(this->coord2offset(xyz)); }
+    bool isValueOn(const Coord& xyz) const { return mValueMask.isOn(this->coordToOffset(xyz)); }
     /// Return @c true if the voxel at the given offset is active.
     bool isValueOn(Index offset) const { assert(offset < SIZE); return mValueMask.isOn(offset); }
 
     /// Return @c false since leaf nodes never contain tiles.
     static bool hasActiveTiles() { return false; }
 
-    /// @brief Set all voxels within an axis-aligned box to the given active state.
-    /// (The bbox coordinates are inclusive.)
+    /// Set all voxels within an axis-aligned box to the specified value and active state.
     void fill(const CoordBBox& bbox, bool value, bool active = true);
 
-    /// @brief Sets all values to the specified value. Their state is unchanged.
+    /// Set all voxels to the specified value but don't change their active states.
     void fill(const bool& value);
-
-    /// @brief Sets all values to the specified value and state
+    /// Set all voxels to the specified value and active state.
     void fill(const bool& value, bool active);
 
     /// @brief Copy into a dense grid the values of the voxels that lie within
@@ -345,37 +349,54 @@ public:
     void copyFromDense(const CoordBBox& bbox, const DenseT& dense, bool background, bool tolerance);
 
     /// @brief Return the value of the voxel at the given coordinates.
-    /// @note Used internally by ValueAccessor (note last argument is a dummy).
+    /// @note Used internally by ValueAccessor.
     template<typename AccessorT>
     const bool& getValueAndCache(const Coord& xyz, AccessorT&) const {return this->getValue(xyz);}
 
     /// @brief Return @c true if the voxel at the given coordinates is active.
-    /// @note Used internally by ValueAccessor (note last argument is a dummy).
+    /// @note Used internally by ValueAccessor.
     template<typename AccessorT>
     bool isValueOnAndCache(const Coord& xyz, AccessorT&) const { return this->isValueOn(xyz); }
 
     /// @brief Change the value of the voxel at the given coordinates and mark it as active.
-    /// @note Used internally by ValueAccessor (note last argument is a dummy).
+    /// @note Used internally by ValueAccessor.
     template<typename AccessorT>
     void setValueAndCache(const Coord& xyz, bool val, AccessorT&) { this->setValueOn(xyz, val); }
 
     /// @brief Change the value of the voxel at the given coordinates
     /// but preserve its state.
-    /// @note Used internally by ValueAccessor (last argument is a dummy).
+    /// @note Used internally by ValueAccessor.
     template<typename AccessorT>
     void setValueOnlyAndCache(const Coord& xyz, bool val, AccessorT&) {this->setValueOnly(xyz,val);}
 
     /// @brief Change the value of the voxel at the given coordinates and mark it as inactive.
-    /// @note Used internally by ValueAccessor (note last argument is a dummy).
+    /// @note Used internally by ValueAccessor.
     template<typename AccessorT>
     void setValueOffAndCache(const Coord& xyz, bool value, AccessorT&)
     {
         this->setValueOff(xyz, value);
     }
 
+    /// @brief Apply a functor to the value of the voxel at the given coordinates
+    /// and mark the voxel as active.
+    /// @note Used internally by ValueAccessor.
+    template<typename ModifyOp, typename AccessorT>
+    void modifyValueAndCache(const Coord& xyz, const ModifyOp& op, AccessorT&)
+    {
+        this->modifyValue(xyz, op);
+    }
+
+    /// Apply a functor to the voxel at the given coordinates.
+    /// @note Used internally by ValueAccessor.
+    template<typename ModifyOp, typename AccessorT>
+    void modifyValueAndActiveStateAndCache(const Coord& xyz, const ModifyOp& op, AccessorT&)
+    {
+        this->modifyValueAndActiveState(xyz, op);
+    }
+
     /// @brief Set the active state of the voxel at the given coordinates
     /// without changing its value.
-    /// @note Used internally by ValueAccessor (note last argument is a dummy).
+    /// @note Used internally by ValueAccessor.
     template<typename AccessorT>
     void setActiveStateAndCache(const Coord& xyz, bool on, AccessorT&)
     {
@@ -384,7 +405,7 @@ public:
 
     /// @brief Return @c true if the voxel at the given coordinates is active
     /// and return the voxel value in @a val.
-    /// @note Used internally by ValueAccessor (note last argument is a dummy).
+    /// @note Used internally by ValueAccessor.
     template<typename AccessorT>
     bool probeValueAndCache(const Coord& xyz, bool& val, AccessorT&) const
     {
@@ -392,7 +413,7 @@ public:
     }
 
     /// @brief Return the LEVEL (=0) at which leaf node values reside.
-    /// @note Used internally by ValueAccessor (note last argument is a dummy).
+    /// @note Used internally by ValueAccessor.
     template<typename AccessorT>
     static Index getValueLevelAndCache(const Coord&, AccessorT&) { return LEVEL; }
 
@@ -416,7 +437,9 @@ public:
 
     void negate() { mBuffer.mData.toggle(); }
 
-    void merge(const LeafNode& other);
+    template<MergePolicy Policy>
+    void merge(const LeafNode& other, bool bg = false, bool otherBG = false);
+    template<MergePolicy Policy> void merge(bool tileValue, bool tileActive);
 
     void voxelizeActiveTiles() {};
 
@@ -498,32 +521,53 @@ public:
     void addLeaf(LeafNode*) {}
     template<typename AccessorT>
     void addLeafAndCache(LeafNode*, AccessorT&) {}
-    LeafNode* stealLeaf(const Coord&, bool, bool) { return this; }
-    void addTile(Index, const Coord&, bool, bool) {}
-    template<typename AccessorT>
-    void addTileAndCache(Index, const Coord&, const ValueType&, bool, AccessorT&) {}
+    template<typename NodeT>
+    NodeT* stealNode(const Coord&, const ValueType&, bool) { return NULL; }
+    template<typename NodeT>
+    NodeT* probeNode(const Coord&) { return NULL; }
+    template<typename NodeT>
+    const NodeT* probeConstNode(const Coord&) const { return NULL; }
     //@}
 
+    void addTile(Index level, const Coord&, bool val, bool active);
+    void addTile(Index offset, bool val, bool active);
+    template<typename AccessorT>
+    void addTileAndCache(Index level, const Coord&, bool val, bool active, AccessorT&);
+
     //@{
-    /// @brief return a pointer to itself
+    /// @brief Return a pointer to this node.
     LeafNode* touchLeaf(const Coord&) { return this; }
     template<typename AccessorT>
     LeafNode* touchLeafAndCache(const Coord&, AccessorT&) { return this; }
     LeafNode* probeLeaf(const Coord&) { return this; }
     template<typename AccessorT>
     LeafNode* probeLeafAndCache(const Coord&, AccessorT&) { return this; }
+    template<typename NodeT, typename AccessorT>
+    NodeT* probeNodeAndCache(const Coord&, AccessorT&)
+    {
+        OPENVDB_NO_UNREACHABLE_CODE_WARNING_BEGIN
+        if (!(boost::is_same<NodeT,LeafNode>::value)) return NULL;
+        return reinterpret_cast<NodeT*>(this);
+        OPENVDB_NO_UNREACHABLE_CODE_WARNING_END
+    }
     //@}
     //@{
-    /// @brief return a const pointer to itself
+    /// @brief Return a @const pointer to this node.
     const LeafNode* probeLeaf(const Coord&) const { return this; }
     template<typename AccessorT>
     const LeafNode* probeLeafAndCache(const Coord&, AccessorT&) const { return this; }
     const LeafNode* probeConstLeaf(const Coord&) const { return this; }
     template<typename AccessorT>
     const LeafNode* probeConstLeafAndCache(const Coord&, AccessorT&) const { return this; }
+    template<typename NodeT, typename AccessorT>
+    const NodeT* probeConstNodeAndCache(const Coord&, AccessorT&) const
+    {
+        OPENVDB_NO_UNREACHABLE_CODE_WARNING_BEGIN
+        if (!(boost::is_same<NodeT,LeafNode>::value)) return NULL;
+        return reinterpret_cast<const NodeT*>(this);
+        OPENVDB_NO_UNREACHABLE_CODE_WARNING_END
+    }
     //@}
-    
-    void merge(const LeafNode& other, bool, bool) { this->merge(other); }
 
     //
     // Iterators
@@ -551,6 +595,13 @@ protected:
         void setItem(Index pos, bool value) const { this->parent().setValueOnly(pos, value); }
         // Note: setValue() can't be called on const iterators.
         void setValue(bool value) const { this->setItem(this->pos(), value); }
+
+        // Note: modifyItem() can't be called on const iterators.
+        template<typename ModifyOp>
+        void modifyItem(Index n, const ModifyOp& op) const { this->parent().modifyValue(n, op); }
+        // Note: modifyValue() can't be called on const iterators.
+        template<typename ModifyOp>
+        void modifyValue(const ModifyOp& op) const { this->modifyItem(this->pos(), op); }
     };
 
     /// Leaf nodes have no children, so their child iterators have no get/set accessors.
@@ -707,9 +758,6 @@ private:
     friend class IteratorBase<MaskDenseIter, LeafNode>;
     //@}
 
-    // Disallow copying.
-    LeafNode& operator=(const LeafNode&);
-
 }; // class LeafNode<bool>
 
 
@@ -747,7 +795,7 @@ inline
 LeafNode<bool, Log2Dim>::LeafNode(const LeafNode<ValueT, Log2Dim>& other, TopologyCopy):
     mValueMask(other.getValueMask()),
     mBuffer(other.getValueMask()), // value = active state
-    mOrigin(other.getOrigin())
+    mOrigin(other.origin())
 {
 }
 
@@ -759,7 +807,7 @@ LeafNode<bool, Log2Dim>::LeafNode(const LeafNode<ValueT, Log2Dim>& other,
                                   bool offValue, bool onValue, TopologyCopy):
     mValueMask(other.getValueMask()),
     mBuffer(other.getValueMask()),
-    mOrigin(other.getOrigin())
+    mOrigin(other.origin())
 {
     if (offValue) { if (!onValue) mBuffer.mData.toggle(); else mBuffer.mData.setOn(); }
 }
@@ -772,7 +820,7 @@ LeafNode<bool, Log2Dim>::LeafNode(const LeafNode<ValueT, Log2Dim>& other,
                                   bool background, TopologyCopy):
     mValueMask(other.getValueMask()),
     mBuffer(background),
-    mOrigin(other.getOrigin())
+    mOrigin(other.origin())
 {
 }
 
@@ -819,6 +867,22 @@ LeafNode<bool, Log2Dim>::evalActiveVoxelBoundingBox(CoordBBox& bbox) const
     }
 }
 
+template<Index Log2Dim>
+inline void
+LeafNode<bool, Log2Dim>::evalActiveBoundingBox(CoordBBox& bbox, bool visitVoxels) const
+{
+    CoordBBox this_bbox = this->getNodeBoundingBox();
+    if (bbox.isInside(this_bbox)) return;//this LeafNode is already enclosed in the bbox
+    if (ValueOnCIter iter = this->cbeginValueOn()) {//any active values?
+        if (visitVoxels) {//use voxel granularity?
+            this_bbox.reset();
+            for(; iter; ++iter) this_bbox.expand(this->offsetToLocalCoord(iter.pos()));
+            this_bbox.translate(this->origin());
+        }
+        bbox.expand(this_bbox);
+    }
+}
+
 
 template<Index Log2Dim>
 template<typename OtherType, Index OtherLog2Dim>
@@ -846,7 +910,7 @@ LeafNode<bool, Log2Dim>::str() const
 
 template<Index Log2Dim>
 inline Index
-LeafNode<bool, Log2Dim>::coord2offset(const Coord& xyz)
+LeafNode<bool, Log2Dim>::coordToOffset(const Coord& xyz)
 {
     assert ((xyz[0] & DIM-1u) < DIM && (xyz[1] & DIM-1u) < DIM && (xyz[2] & DIM-1u) < DIM);
     return ((xyz[0] & DIM-1u) << 2*Log2Dim) + ((xyz[1] & DIM-1u) << Log2Dim) + (xyz[2] & DIM-1u);
@@ -855,7 +919,7 @@ LeafNode<bool, Log2Dim>::coord2offset(const Coord& xyz)
 
 template<Index Log2Dim>
 inline Coord
-LeafNode<bool, Log2Dim>::offset2coord(Index n)
+LeafNode<bool, Log2Dim>::offsetToLocalCoord(Index n)
 {
     assert(n < (1 << 3*Log2Dim));
     Coord xyz;
@@ -869,9 +933,9 @@ LeafNode<bool, Log2Dim>::offset2coord(Index n)
 
 template<Index Log2Dim>
 inline Coord
-LeafNode<bool, Log2Dim>::offset2globalCoord(Index n) const
+LeafNode<bool, Log2Dim>::offsetToGlobalCoord(Index n) const
 {
-    return (this->offset2coord(n) + this->getOrigin());
+    return (this->offsetToLocalCoord(n) + this->origin());
 }
 
 
@@ -974,7 +1038,9 @@ template<Index Log2Dim>
 inline bool
 LeafNode<bool, Log2Dim>::isConstant(bool& constValue, bool& state, bool tolerance) const
 {
-    if (!(mValueMask.isOn() || mValueMask.isOff())) return false;
+    state = mValueMask.isOn();
+    
+    if (!(state || mValueMask.isOff())) return false;
 
     // Note: if tolerance is true (i.e., 1), then all boolean values compare equal.
     if (!tolerance && !(mBuffer.mData.isOn() || mBuffer.mData.isOff())) return false;
@@ -989,11 +1055,41 @@ LeafNode<bool, Log2Dim>::isConstant(bool& constValue, bool& state, bool toleranc
 
 
 template<Index Log2Dim>
+inline void
+LeafNode<bool, Log2Dim>::addTile(Index level, const Coord& xyz, bool val, bool active)
+{
+    assert(level == 0);
+    this->addTile(this->coordToOffset(xyz), val, active);
+}
+
+template<Index Log2Dim>
+inline void
+LeafNode<bool, Log2Dim>::addTile(Index offset, bool val, bool active)
+{
+    assert(offset < SIZE);
+    setValueOnly(offset, val);
+    setActiveState(offset, active);
+}
+
+template<Index Log2Dim>
+template<typename AccessorT>
+inline void
+LeafNode<bool, Log2Dim>::addTileAndCache(Index level, const Coord& xyz,
+    bool val, bool active, AccessorT&)
+{
+    this->addTile(level, xyz, val, active);
+}
+
+
+////////////////////////////////////////
+
+
+template<Index Log2Dim>
 inline const bool&
 LeafNode<bool, Log2Dim>::getValue(const Coord& xyz) const
 {
     // This *CANNOT* use operator ? because Visual C++
-    if (mBuffer.mData.isOn(this->coord2offset(xyz))) return sOn; else return sOff;
+    if (mBuffer.mData.isOn(this->coordToOffset(xyz))) return sOn; else return sOff;
 }
 
 
@@ -1011,7 +1107,7 @@ template<Index Log2Dim>
 inline bool
 LeafNode<bool, Log2Dim>::probeValue(const Coord& xyz, bool& val) const
 {
-    const Index offset = this->coord2offset(xyz);
+    const Index offset = this->coordToOffset(xyz);
     val = mBuffer.mData.isOn(offset);
     return mValueMask.isOn(offset);
 }
@@ -1021,9 +1117,25 @@ template<Index Log2Dim>
 inline void
 LeafNode<bool, Log2Dim>::setValueOn(const Coord& xyz, bool val)
 {
-    const Index offset = this->coord2offset(xyz);
+    this->setValueOn(this->coordToOffset(xyz), val);
+}
+
+
+template<Index Log2Dim>
+inline void
+LeafNode<bool, Log2Dim>::setValueOn(Index offset, bool val)
+{
+    assert(offset < SIZE);
     mValueMask.setOn(offset);
     mBuffer.mData.set(offset, val);
+}
+
+
+template<Index Log2Dim>
+inline void
+LeafNode<bool, Log2Dim>::setValueOnly(const Coord& xyz, bool val)
+{
+    this->setValueOnly(this->coordToOffset(xyz), val);
 }
 
 
@@ -1031,7 +1143,7 @@ template<Index Log2Dim>
 inline void
 LeafNode<bool, Log2Dim>::setActiveState(const Coord& xyz, bool on)
 {
-    mValueMask.set(this->coord2offset(xyz), on);
+    mValueMask.set(this->coordToOffset(xyz), on);
 }
 
 
@@ -1039,55 +1151,51 @@ template<Index Log2Dim>
 inline void
 LeafNode<bool, Log2Dim>::setValueOff(const Coord& xyz, bool val)
 {
-    const Index offset = this->coord2offset(xyz);
+    this->setValueOff(this->coordToOffset(xyz), val);
+}
+
+
+template<Index Log2Dim>
+inline void
+LeafNode<bool, Log2Dim>::setValueOff(Index offset, bool val)
+{
+    assert(offset < SIZE);
     mValueMask.setOff(offset);
     mBuffer.mData.set(offset, val);
 }
 
 
 template<Index Log2Dim>
+template<typename ModifyOp>
 inline void
-LeafNode<bool, Log2Dim>::setValueOnMin(const Coord& xyz, bool val)
+LeafNode<bool, Log2Dim>::modifyValue(Index offset, const ModifyOp& op)
 {
-    const Index offset = this->coord2offset(xyz);
+    bool val = mBuffer.mData.isOn(offset);
+    op(val);
+    mBuffer.mData.set(offset, val);
     mValueMask.setOn(offset);
-    mBuffer.mData.set(offset, val && mBuffer.mData.isOn(offset));
 }
 
 
 template<Index Log2Dim>
+template<typename ModifyOp>
 inline void
-LeafNode<bool, Log2Dim>::setValueOnMax(const Coord& xyz, bool val)
+LeafNode<bool, Log2Dim>::modifyValue(const Coord& xyz, const ModifyOp& op)
 {
-    const Index offset = this->coord2offset(xyz);
-    mValueMask.setOn(offset);
-    mBuffer.mData.set(offset, val || mBuffer.mData.isOn(offset));
+    this->modifyValue(this->coordToOffset(xyz), op);
 }
 
 
 template<Index Log2Dim>
+template<typename ModifyOp>
 inline void
-LeafNode<bool, Log2Dim>::setValueOnSum(const Coord& xyz, bool val)
+LeafNode<bool, Log2Dim>::modifyValueAndActiveState(const Coord& xyz, const ModifyOp& op)
 {
-    const Index offset = this->coord2offset(xyz);
-    mValueMask.setOn(offset);
-    mBuffer.mData.set(offset, val || mBuffer.mData.isOn(offset)); // true + true = true
-}
-
-
-template<Index Log2Dim>
-inline void
-LeafNode<bool, Log2Dim>::addValue(bool val)
-{
-    if (val) mBuffer.mData |= mValueMask; // set all active voxels to true
-}
-
-
-template<Index Log2Dim>
-inline void
-LeafNode<bool, Log2Dim>::scaleValue(bool val)
-{
-    if (!val) mBuffer.mData &= !mValueMask; // set all active voxels to false
+    const Index offset = this->coordToOffset(xyz);
+    bool val = mBuffer.mData.isOn(offset), state = mValueMask.isOn(offset);
+    op(val, state);
+    mBuffer.mData.set(offset, val);
+    mValueMask.set(offset, state);
 }
 
 
@@ -1108,15 +1216,35 @@ LeafNode<bool, Log2Dim>::resetBackground(bool oldBackground, bool newBackground)
 
 
 template<Index Log2Dim>
+template<MergePolicy Policy>
 inline void
-LeafNode<bool, Log2Dim>::merge(const LeafNode& other)
+LeafNode<bool, Log2Dim>::merge(const LeafNode& other, bool /*bg*/, bool /*otherBG*/)
 {
+    OPENVDB_NO_UNREACHABLE_CODE_WARNING_BEGIN
+    if (Policy == MERGE_NODES) return;
     for (typename NodeMaskType::OnIterator iter = other.mValueMask.beginOn(); iter; ++iter) {
         const Index n = iter.pos();
-        if (mValueMask.isOn(n)) continue;
-        mBuffer.mData.set(n, other.mBuffer.mData.isOn(n));
-        mValueMask.setOn(n);
+        if (mValueMask.isOff(n)) {
+            mBuffer.mData.set(n, other.mBuffer.mData.isOn(n));
+            mValueMask.setOn(n);
+        }
     }
+    OPENVDB_NO_UNREACHABLE_CODE_WARNING_END
+}
+
+template<Index Log2Dim>
+template<MergePolicy Policy>
+inline void
+LeafNode<bool, Log2Dim>::merge(bool tileValue, bool tileActive)
+{
+    OPENVDB_NO_UNREACHABLE_CODE_WARNING_BEGIN
+    if (Policy != MERGE_ACTIVE_STATES_AND_NODES) return;
+    if (!tileActive) return;
+    // Replace all inactive values with the active tile value.
+    if (tileValue) mBuffer.mData |= !mValueMask; // -0=>1, +0=>0, -1=>1, +1=>1 (-,+ = off,on)
+    else mBuffer.mData &= mValueMask;            // -0=>0, +0=>0, -1=>0, +1=>1
+    mValueMask.setOn();
+    OPENVDB_NO_UNREACHABLE_CODE_WARNING_END
 }
 
 
@@ -1214,13 +1342,13 @@ LeafNode<bool, Log2Dim>::copyFromDense(const CoordBBox& bbox, const DenseT& dens
     const size_t xStride = dense.xStride(), yStride = dense.yStride();// zStride=1
     const Coord& min = dense.bbox().min();
     const bool* s0 = dense.data() + bbox.min()[2]-min[2];//source
-    const Int32      n0 = bbox.min()[2]&DIM-1u;
+    const Int32 n0 = bbox.min()[2]&DIM-1u;
     for (Int32 x = bbox.min()[0], ex=bbox.max()[0]+1; x<ex; ++x) {
         const bool* s1 = s0 + xStride*(x-min[0]);
-        const Int32      n1 = n0 + ((x&DIM-1u)<<2*LOG2DIM);
+        const Int32 n1 = n0 + ((x&DIM-1u)<<2*LOG2DIM);
         for (Int32 y = bbox.min()[1], ey=bbox.max()[1]+1; y<ey; ++y) {
             const bool* s2 = s1 + yStride*(y-min[1]);
-            Int32            n2 = n1 + ((y&DIM-1u)<<LOG2DIM) ;
+            Int32 n2 = n1 + ((y&DIM-1u)<<LOG2DIM);
             for (Int32 z = bbox.min()[2], ez=bbox.max()[2]+1; z<ez ; ++z, ++n2, ++s2) {
                 // Note: if tolerance is true (i.e., 1), then all boolean values compare equal.
                 if (tolerance || background == *s2) {
