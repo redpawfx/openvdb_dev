@@ -28,12 +28,15 @@
 //
 ///////////////////////////////////////////////////////////////////////////
 
-
-#include "Viewer.h"
+#include <openvdb_viewer/Viewer.h>
 #include <iostream>
 #include <string>
 #include <vector>
 #include <exception>
+#ifdef DWA_OPENVDB
+#include <logging_base/logging.h>
+#include <usagetrack.h>
+#endif
 
 
 void
@@ -44,28 +47,30 @@ usage(const char* progName, int status)
 "Which: displays OpenVDB grids\n" <<
 "Options:\n" <<
 "    -i            print grid info\n" <<
-"    -d            print debug info\n" <<
+"    -d            print debugging info\n" <<
 "Controls:\n" <<
-"    -> (Right)    show next grid\n" <<
-"    <- (Left)     show previous grid\n" <<
-"    1             toggle tree topology view on/off\n" <<
-"    2             toggle surface view on/off\n" <<
-"    3             toggle data view on/off\n" <<
-"    H             (\"home\") look at origin\n" <<
-"    G             (\"geometry\") look at center of geometry\n" <<
-"    I             toggle on-screen grid info on/off\n" <<
-"    Esc           exit\n" <<
-"    left mouse    tumble\n" <<
-"    scroll wheel  zoom\n" <<
-"    right mouse   pan\n" <<
-"Cut planes:\n" <<
-"    X + scroll wheel               move right cut plane\n" <<
-"    Shift + X + scroll wheel       move left cut plane\n" <<
-"    Y + scroll wheel               move top cut plane\n" <<
-"    Shift + Y + scroll wheel       move bottom cut plane\n" <<
-"    Z + scroll wheel               move front cut plane\n" <<
-"    Shift + Z + scroll wheel       move back cut plane\n" <<
-"    Ctrl + {X,Y,Z} + scroll wheel  move both {X,Y,Z} cut planes\n";
+"    Esc                exit\n" <<
+"    -> (Right)         show next grid\n" <<
+"    <- (Left)          show previous grid\n" <<
+"    1                  toggle tree topology view on/off\n" <<
+"    2                  toggle surface view on/off\n" <<
+"    3                  toggle data view on/off\n" <<
+"    G                  (\"geometry\") look at center of geometry\n" <<
+"    H                  (\"home\") look at origin\n" <<
+"    I                  toggle on-screen grid info on/off\n" <<
+"    left mouse         tumble\n" <<
+"    right mouse        pan\n" <<
+"    mouse wheel        zoom\n" <<
+"\n" <<
+"    X + wheel          move right cut plane\n" <<
+"    Shift + X + wheel  move left cut plane\n" <<
+"    Y + wheel          move top cut plane\n" <<
+"    Shift + Y + wheel  move bottom cut plane\n" <<
+"    Z + wheel          move front cut plane\n" <<
+"    Shift + Z + wheel  move back cut plane\n" <<
+"    Ctrl + X + wheel   move both X cut planes\n" <<
+"    Ctrl + Y + wheel   move both Y cut planes\n" <<
+"    Ctrl + Z + wheel   move both Z cut planes\n";
     exit(status);
 }
 
@@ -74,8 +79,13 @@ usage(const char* progName, int status)
 
 
 int
-main(int argc, char * const argv[])
+main(int argc, char *argv[])
 {
+#ifdef DWA_OPENVDB
+    USAGETRACK_report_basic_tool_usage(argc, argv, /*duration=*/0);
+    logging_base::configure(argc, argv);
+#endif
+
     const char* progName = argv[0];
     if (const char* ptr = ::strrchr(progName, '/')) progName = ptr + 1;
 
@@ -83,7 +93,6 @@ main(int argc, char * const argv[])
 
     try {
         openvdb::initialize();
-        
 
         bool printInfo = false, printDebugInfo = false;
 
@@ -104,7 +113,7 @@ main(int argc, char * const argv[])
             }
         }
 
-        Viewer::init(progName, printDebugInfo);
+        openvdb_viewer::Viewer viewer = openvdb_viewer::init(progName, printDebugInfo);
 
         const size_t numFiles = filenames.size();
         if (numFiles == 0) usage(progName, EXIT_FAILURE);
@@ -136,7 +145,7 @@ main(int argc, char * const argv[])
             }
         }
 
-        Viewer::view(allGrids);
+        viewer.view(allGrids);
 
     } catch (const char* s) {
         OPENVDB_LOG_ERROR(progName << ": " << s);

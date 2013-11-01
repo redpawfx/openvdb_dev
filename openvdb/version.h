@@ -42,7 +42,7 @@
 /// vdb::vX_Y_Z::Vec3i, vdb::vX_Y_Z::io::File, vdb::vX_Y_Z::tree::Tree, etc.,
 /// where X, Y and Z are OPENVDB_LIBRARY_MAJOR_VERSION, OPENVDB_LIBRARY_MINOR_VERSION
 /// and OPENVDB_LIBRARY_PATCH_VERSION, respectively (defined below).
-#define OPENVDB_VERSION_NAME v1_1_1
+#define OPENVDB_VERSION_NAME v2_0_0
 
 /// If OPENVDB_REQUIRE_VERSION_NAME is undefined, symbols from the version
 /// namespace are promoted to the top-level namespace (e.g., vdb::v1_0_0::io::File
@@ -68,9 +68,9 @@ namespace OPENVDB_VERSION_NAME {
 const int32_t OPENVDB_MAGIC = 0x56444220;
 
 const uint32_t
-    OPENVDB_LIBRARY_MAJOR_VERSION = 1,
-    OPENVDB_LIBRARY_MINOR_VERSION = 1,
-    OPENVDB_LIBRARY_PATCH_VERSION = 1;
+    OPENVDB_LIBRARY_MAJOR_VERSION = 2,
+    OPENVDB_LIBRARY_MINOR_VERSION = 0,
+    OPENVDB_LIBRARY_PATCH_VERSION = 0;
 
 /// @brief The current version number of the VDB file format
 /// @details  This can be used to enable various backwards compatability switches
@@ -89,7 +89,7 @@ enum {
     OPENVDB_FILE_VERSION_NEW_TRANSFORM = 219,
     OPENVDB_FILE_VERSION_SELECTIVE_COMPRESSION = 220,
     OPENVDB_FILE_VERSION_FLOAT_FRUSTUM_BBOX = 221,
-    OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION = 222,
+    OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION = 222
 };
 
 
@@ -105,12 +105,21 @@ OPENVDB_API VersionId getLibraryVersion(std::istream&);
 OPENVDB_API std::string getVersion(std::istream&);
 // Associate the current file format and library version numbers with the given input stream.
 OPENVDB_API void setCurrentVersion(std::istream&);
+// Associate specific file format and library version numbers with the given stream.
+OPENVDB_API void setVersion(std::ios_base&, const VersionId& libraryVersion, uint32_t fileVersion);
 // Return a bitwise OR of compression option flags (COMPRESS_ZIP, COMPRESS_ACTIVE_MASK, etc.)
 // specifying whether and how input data is compressed or output data should be compressed.
 OPENVDB_API uint32_t getDataCompression(std::ios_base&);
+// Associate with the given stream a bitwise OR of compression option flags (COMPRESS_ZIP,
+// COMPRESS_ACTIVE_MASK, etc.) specifying whether and how input data is compressed
+// or output data should be compressed.
+OPENVDB_API void setDataCompression(std::ios_base&, uint32_t compressionFlags);
 // Return the class (GRID_LEVEL_SET, GRID_UNKNOWN, etc.) of the grid
 // currently being read from or written to the given stream.
 OPENVDB_API uint32_t getGridClass(std::ios_base&);
+// brief Associate with the given stream the class (GRID_LEVEL_SET, GRID_UNKNOWN, etc.)
+// of the grid currently being read or written.
+OPENVDB_API void setGridClass(std::ios_base&, uint32_t);
 // Return a pointer to the background value of the grid currently being
 // read from or written to the given stream.
 OPENVDB_API const void* getGridBackgroundValuePtr(std::ios_base&);

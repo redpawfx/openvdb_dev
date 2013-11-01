@@ -574,9 +574,9 @@ public:
 
 protected:
     virtual OP_ERROR cookMySop(OP_Context&);
-    virtual unsigned disableParms();
+    virtual bool updateParmsFlags();
 
-    OP_ERROR evalAdvectionParms(OP_Context&, AdvectionParms&);
+    bool evalAdvectionParms(OP_Context&, AdvectionParms&);
 };
 
 
@@ -702,26 +702,26 @@ SOP_OpenVDBAdvectPoints::SOP_OpenVDBAdvectPoints(OP_Network* net,
 
 // Enable/disable or show/hide parameters in the UI.
 
-unsigned
-SOP_OpenVDBAdvectPoints::disableParms()
+bool
+SOP_OpenVDBAdvectPoints::updateParmsFlags()
 {
-    unsigned changed = 0;
+    bool changed = false;
 
     UT_String str;
     evalString(str, "propagation", 0, 0);
     const PropagationType propagation = stringToPropagationType(str.toStdString());
 
-    changed += enableParm("cptIterations", propagation != PROPAGATION_TYPE_ADVECTION);
-    changed += enableParm("integration", propagation != PROPAGATION_TYPE_PROJECTION);
-    changed += enableParm("timeStep", propagation != PROPAGATION_TYPE_PROJECTION);
-    changed += enableParm("steps", propagation != PROPAGATION_TYPE_PROJECTION);
-    changed += enableParm("outputStreamlines", propagation != PROPAGATION_TYPE_PROJECTION);
+    changed |= enableParm("cptIterations", propagation != PROPAGATION_TYPE_ADVECTION);
+    changed |= enableParm("integration", propagation != PROPAGATION_TYPE_PROJECTION);
+    changed |= enableParm("timeStep", propagation != PROPAGATION_TYPE_PROJECTION);
+    changed |= enableParm("steps", propagation != PROPAGATION_TYPE_PROJECTION);
+    changed |= enableParm("outputStreamlines", propagation != PROPAGATION_TYPE_PROJECTION);
 
-    setVisibleState("cptIterations", getEnableState("cptIterations"));
-    setVisibleState("integration", getEnableState("integration"));
-    setVisibleState("timeStep", getEnableState("timeStep"));
-    setVisibleState("steps", getEnableState("steps"));
-    setVisibleState("outputStreamlines", getEnableState("outputStreamlines"));
+    changed |= setVisibleState("cptIterations", getEnableState("cptIterations"));
+    changed |= setVisibleState("integration", getEnableState("integration"));
+    changed |= setVisibleState("timeStep", getEnableState("timeStep"));
+    changed |= setVisibleState("steps", getEnableState("steps"));
+    changed |= setVisibleState("outputStreamlines", getEnableState("outputStreamlines"));
 
     return changed;
 }
@@ -740,7 +740,7 @@ SOP_OpenVDBAdvectPoints::cookMySop(OP_Context& context)
 
         // Evaluate UI parameters
         AdvectionParms parms(gdp);
-        if (evalAdvectionParms(context, parms) >= UT_ERROR_ABORT) return error();
+        if (!evalAdvectionParms(context, parms)) return error();
 
         hvdb::Interrupter boss("Processing points");
 
@@ -776,7 +776,7 @@ SOP_OpenVDBAdvectPoints::cookMySop(OP_Context& context)
 ////////////////////////////////////////
 
 
-OP_ERROR
+bool
 SOP_OpenVDBAdvectPoints::evalAdvectionParms(OP_Context& context, AdvectionParms& parms)
 {
     fpreal now = context.getTime();
@@ -786,18 +786,23 @@ SOP_OpenVDBAdvectPoints::evalAdvectionParms(OP_Context& context, AdvectionParms&
 
     if (!parms.mPointGeo) {
         addError(SOP_MESSAGE, "Missing point input");
-        return UT_ERROR_ABORT;
+        return false;
     }
 
     evalString(str, "ptnGroup", 0, now);
     parms.mPointGroup = parsePointGroups(str, gdp);
+
+    if (!parms.mPointGroup && str.length() > 0) {
+        addWarning(SOP_MESSAGE, "Point group not found");
+        return false;
+    }
 
     evalString(str, "propagation", 0, now);
     parms.mPropagationType = stringToPropagationType(str.toStdString());
 
     if (parms.mPropagationType == PROPAGATION_TYPE_UNKNOWN) {
         addError(SOP_MESSAGE, "Unknown propargation scheme");
-        return UT_ERROR_ABORT;
+        return false;
     }
 
     if (parms.mPropagationType == PROPAGATION_TYPE_ADVECTION ||
@@ -807,7 +812,7 @@ SOP_OpenVDBAdvectPoints::evalAdvectionParms(OP_Context& context, AdvectionParms&
 
         if (!velGeo) {
             addError(SOP_MESSAGE, "Missing velocity grid input");
-            return UT_ERROR_ABORT;
+            return false;
         }
 
         evalString(str, "velGroup", 0, now);
@@ -819,7 +824,7 @@ SOP_OpenVDBAdvectPoints::evalAdvectionParms(OP_Context& context, AdvectionParms&
 
         if (!parms.mVelPrim) {
             addError(SOP_MESSAGE, "Missing velocity grid");
-            return UT_ERROR_ABORT;
+            return false;
         }
 
         // Check if the velocity grid uses a staggered representation.
@@ -838,7 +843,7 @@ SOP_OpenVDBAdvectPoints::evalAdvectionParms(OP_Context& context, AdvectionParms&
 
         if (parms.mIntegrationType == INTEGRATION_TYPE_UNKNOWN) {
             addError(SOP_MESSAGE, "Unknown integration scheme");
-            return UT_ERROR_ABORT;
+            return false;
         }
 
     }
@@ -850,7 +855,7 @@ SOP_OpenVDBAdvectPoints::evalAdvectionParms(OP_Context& context, AdvectionParms&
 
         if (!cptGeo) {
             addError(SOP_MESSAGE, "Missing closest point grid input");
-            return UT_ERROR_ABORT;
+            return false;
         }
 
         evalString(str, "cptGroup", 0, now);
@@ -862,13 +867,13 @@ SOP_OpenVDBAdvectPoints::evalAdvectionParms(OP_Context& context, AdvectionParms&
 
         if (!parms.mCptPrim) {
             addError(SOP_MESSAGE, "Missing closest point grid");
-            return UT_ERROR_ABORT;
+            return false;
         }
 
         parms.mIterations = evalInt("cptIterations", 0, now);
     }
 
-    return error();
+    return true;
 }
 
 // Copyright (c) 2012-2013 DreamWorks Animation LLC

@@ -68,7 +68,7 @@ protected:
     struct RebuildOp;
 
     virtual OP_ERROR cookMySop(OP_Context&);
-    virtual unsigned disableParms();
+    virtual bool updateParmsFlags();
 };
 
 
@@ -202,22 +202,22 @@ newSopOperator(OP_OperatorTable* table)
 
 
 // Disable UI Parms.
-unsigned
-SOP_OpenVDB_Resample::disableParms()
+bool
+SOP_OpenVDB_Resample::updateParmsFlags()
 {
-    unsigned changed = 0;
+    bool changed = false;
 
     const int mode = evalInt("mode", 0, 0);
-    changed += enableParm("translate", mode == MODE_PARMS);
-    changed += enableParm("rotate", mode == MODE_PARMS);
-    changed += enableParm("scale", mode == MODE_PARMS);
-    changed += enableParm("pivot", mode == MODE_PARMS);
-    changed += enableParm("xOrd", mode == MODE_PARMS);
-    changed += enableParm("rOrd", mode == MODE_PARMS);
-    changed += enableParm("reference_grid", mode == MODE_REF_GRID);
-    changed += enableParm("voxel_size", mode == MODE_VOXEL_SIZE);
+    changed |= enableParm("translate", mode == MODE_PARMS);
+    changed |= enableParm("rotate", mode == MODE_PARMS);
+    changed |= enableParm("scale", mode == MODE_PARMS);
+    changed |= enableParm("pivot", mode == MODE_PARMS);
+    changed |= enableParm("xOrd", mode == MODE_PARMS);
+    changed |= enableParm("rOrd", mode == MODE_PARMS);
+    changed |= enableParm("reference_grid", mode == MODE_REF_GRID);
+    changed |= enableParm("voxel_size", mode == MODE_VOXEL_SIZE);
 
-    changed += enableParm("tolerance", evalInt("prune", 0, 0));
+    changed |= enableParm("tolerance", evalInt("prune", 0, 0));
 
     return changed;
 }
@@ -360,12 +360,20 @@ SOP_OpenVDB_Resample::cookMySop(OP_Context& context)
             if (progress.wasInterrupted()) throw std::runtime_error("Was Interrupted");
 
             GU_PrimVDB* vdb = *it;
-            const hvdb::Grid& grid = vdb->getGrid();
 
             const UT_VDBType valueType = vdb->getStorageType();
 
-            const bool isLevelSet = ((grid.getGridClass() == openvdb::GRID_LEVEL_SET)
+            const bool isLevelSet = ((vdb->getGrid().getGridClass() == openvdb::GRID_LEVEL_SET)
                 && (valueType == UT_VDB_FLOAT || valueType == UT_VDB_DOUBLE));
+
+            if (isLevelSet && !rebuild) {
+                // If the input grid is a level set but level set rebuild is disabled,
+                // set the grid's class to "unknown", to prevent the resample tool
+                // from triggering a rebuild.
+                vdb->getGrid().setGridClass(openvdb::GRID_UNKNOWN);
+            }
+
+            const hvdb::Grid& grid = vdb->getGrid();
 
             // Override the sampling order for boolean grids.
             int curOrder = samplingOrder;

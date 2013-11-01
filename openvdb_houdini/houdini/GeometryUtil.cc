@@ -37,13 +37,16 @@
 
 #include <UT/UT_ScopedPtr.h>
 #include <UT/UT_String.h>
+#include <UT/UT_BoundingBox.h>
 #include <GU/GU_PrimPoly.h>
 #include <GU/GU_ConvertParms.h>
 #include <GA/GA_ElementWrangler.h>
 #include <GA/GA_PageIterator.h>
 #include <GA/GA_Types.h>
 
+
 namespace openvdb_houdini {
+
 
 void
 drawFrustum(
@@ -202,6 +205,32 @@ drawFrustum(
 ////////////////////////////////////////
 
 
+bool
+pointInPrimGroup(GA_Offset ptnOffset, GU_Detail& geo, const GA_PrimitiveGroup& group)
+{
+    bool surfacePrim = false;
+
+    GA_Offset primOffset, vtxOffset = geo.pointVertex(ptnOffset);
+
+    while (GAisValid(vtxOffset)) {
+
+        primOffset = geo.vertexPrimitive(vtxOffset);
+
+        if (group.containsIndex(geo.primitiveIndex(primOffset))) {
+            surfacePrim = true;
+            break;
+        }
+
+        vtxOffset = geo.vertexToNextVertex(vtxOffset);
+    }
+
+    return surfacePrim;
+}
+
+
+////////////////////////////////////////
+
+
 boost::shared_ptr<GU_Detail>
 validateGeometry(const GU_Detail& geometry, std::string& warning, Interrupter* boss)
 {
@@ -242,8 +271,13 @@ validateGeometry(const GU_Detail& geometry, std::string& warning, Interrupter* b
 
     if (needconvert) {
         GU_ConvertParms parms;
+#if (UT_VERSION_INT < 0x0d0000b1) // before 13.0.177
         parms.fromType = GEO_PrimTypeCompat::GEOPRIMALL;
         parms.toType = GEO_PrimTypeCompat::GEOPRIMPOLY;
+#else
+        parms.setFromType(GEO_PrimTypeCompat::GEOPRIMALL);
+        parms.setToType(GEO_PrimTypeCompat::GEOPRIMPOLY);
+#endif
         geoPtr->convert(parms);
     }
 
@@ -386,9 +420,10 @@ PrimCpyOp::operator()(const GA_SplittableRange &r) const
 ////////////////////////////////////////
 
 
-VertexNormalOp::VertexNormalOp(GU_Detail& detail, const GA_PrimitiveGroup *interiorPrims)
+VertexNormalOp::VertexNormalOp(GU_Detail& detail, const GA_PrimitiveGroup *interiorPrims, float angle)
     : mDetail(detail)
     , mInteriorPrims(interiorPrims)
+    , mAngle(angle)
 {
     GA_RWAttributeRef attributeRef =
         detail.findFloatTuple(GA_ATTRIB_VERTEX, "N", 3);
@@ -430,7 +465,7 @@ VertexNormalOp::operator()(const GA_SplittableRange& range) const
                         primOffset = mDetail.vertexPrimitive(vtxOffset);
                         if (interiorPrim == isInteriorPrim(primOffset)) {
                             tmpN = mDetail.getGEOPrimitive(primOffset)->computeNormal();
-                            if (tmpN.dot(primN) > 0.7) avgN += tmpN;
+                            if (tmpN.dot(primN) > mAngle) avgN += tmpN;
                         }
                         vtxOffset = mDetail.vertexToNextVertex(vtxOffset);
                     }
@@ -443,6 +478,140 @@ VertexNormalOp::operator()(const GA_SplittableRange& range) const
         }
     }
 }
+
+
+////////////////////////////////////////
+
+
+SharpenFeaturesOp::SharpenFeaturesOp(
+    GU_Detail& meshGeo, const GU_Detail& refGeo, EdgeData& edgeData,
+    const openvdb::math::Transform& xform,
+    const GA_PrimitiveGroup * surfacePrims,
+    const openvdb::BoolTree * mask)
+    : mMeshGeo(meshGeo)
+    , mRefGeo(refGeo)
+    , mEdgeData(edgeData)
+    , mXForm(xform)
+    , mSurfacePrims(surfacePrims)
+    , mMaskTree(mask)
+{
+}
+
+void
+SharpenFeaturesOp::operator()(const GA_SplittableRange& range) const
+{
+    openvdb::tools::MeshToVoxelEdgeData::Accessor acc = mEdgeData.getAccessor();
+    
+    typedef openvdb::tree::ValueAccessor<const openvdb::BoolTree> BoolAccessor;
+    boost::scoped_ptr<BoolAccessor> maskAcc;
+
+    if (mMaskTree) {
+        maskAcc.reset(new BoolAccessor(*mMaskTree));
+    }
+
+    GA_Offset start, end, ptnOffset, primOffset;
+
+    UT_Vector3 tmpN, tmpP, avgP;
+    UT_BoundingBoxD cell;
+
+    openvdb::Vec3d pos, normal;
+    openvdb::Coord ijk;
+    
+    std::vector<openvdb::Vec3d> points(12), normals(12);
+    std::vector<openvdb::Index32> primitives(12);
+ 
+    for (GA_PageIterator pageIt = range.beginPages(); !pageIt.atEnd(); ++pageIt) {
+        for (GA_Iterator blockIt(pageIt.begin()); blockIt.blockAdvance(start, end); ) {
+            for (ptnOffset = start; ptnOffset < end; ++ptnOffset) {
+                
+                // Check if this point is referenced by a surface primitive.
+                if (mSurfacePrims && !pointInPrimGroup(ptnOffset, mMeshGeo, *mSurfacePrims)) continue;
+
+                tmpP = mMeshGeo.getPos3(ptnOffset);
+                pos[0] = tmpP.x();
+                pos[1] = tmpP.y();
+                pos[2] = tmpP.z();
+
+                pos = mXForm.worldToIndex(pos);
+
+                ijk[0] = int(std::floor(pos[0]));
+                ijk[1] = int(std::floor(pos[1]));
+                ijk[2] = int(std::floor(pos[2]));
+                
+                
+                if (maskAcc && !maskAcc->isValueOn(ijk)) continue;
+
+                points.clear();
+                normals.clear();
+                primitives.clear();
+                
+                // get voxel-edge intersections
+                mEdgeData.getEdgeData(acc, ijk, points, primitives);
+
+                avgP.assign(0.0, 0.0, 0.0);
+
+                // get normal list
+                for (size_t n = 0, N = points.size(); n < N; ++n) {
+
+                    avgP.x() += points[n].x();
+                    avgP.y() += points[n].y();
+                    avgP.z() += points[n].z();
+
+                    primOffset = mRefGeo.primitiveOffset(primitives[n]);
+
+                    tmpN = mRefGeo.getGEOPrimitive(primOffset)->computeNormal();
+
+                    normal[0] = tmpN.x();
+                    normal[1] = tmpN.y();
+                    normal[2] = tmpN.z();
+
+                    normals.push_back(normal);
+                }
+
+                // Calculate feature point position
+                if (points.size() > 1) {
+
+                    pos = openvdb::tools::findFeaturePoint(points, normals);
+
+                    // Constrain points to stay inside their initial
+                    // coordinate cell.
+                    cell.setBounds(double(ijk[0]), double(ijk[1]), double(ijk[2]),
+                        double(ijk[0]+1), double(ijk[1]+1), double(ijk[2]+1));
+
+                    cell.expandBounds(0.3, 0.3, 0.3);
+
+                    if (!cell.isInside(pos[0], pos[1], pos[2])) {
+
+                        UT_Vector3 org(pos[0], pos[1], pos[2]);
+
+                        avgP *= 1.0 / double(points.size());
+                        UT_Vector3 dir = avgP - org;
+                        dir.normalize();
+
+                        double distance;
+
+                        if(cell.intersectRay(org, dir, 1E17F, &distance) > 0) {
+                            tmpP = org + dir * distance;
+
+                            pos[0] = tmpP.x();
+                            pos[1] = tmpP.y();
+                            pos[2] = tmpP.z();
+                        }
+                    }
+
+                    pos = mXForm.indexToWorld(pos);
+
+                    tmpP.x() = pos[0];
+                    tmpP.y() = pos[1];
+                    tmpP.z() = pos[2];
+
+                    mMeshGeo.setPos3(ptnOffset, tmpP);
+                }
+             }
+        }
+    }
+}
+
 
 } // namespace openvdb_houdini
 

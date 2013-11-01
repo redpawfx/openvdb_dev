@@ -49,12 +49,14 @@ public:
     SOP_OpenVDB_Read(OP_Network*, const char* name, OP_Operator*);
     virtual ~SOP_OpenVDB_Read() {};
 
+    virtual void getDescriptiveParmName(UT_String& s) const { s = "file_name"; }
+
     static void registerSop(OP_OperatorTable*);
     static OP_Node* factory(OP_Network*, const char* name, OP_Operator*);
 
 protected:
     virtual OP_ERROR cookMySop(OP_Context&);
-    virtual unsigned disableParms();
+    virtual bool updateParmsFlags();
 };
 
 
@@ -211,13 +213,13 @@ SOP_OpenVDB_Read::SOP_OpenVDB_Read(OP_Network* net,
 
 
 // Disable parms in the UI.
-unsigned
-SOP_OpenVDB_Read::disableParms()
+bool
+SOP_OpenVDB_Read::updateParmsFlags()
 {
-    unsigned changed = 0;
+    bool changed = false;
     float t = 0.0;
 
-    changed += enableParm("group", evalInt("enable_grouping", 0, t));
+    changed |= enableParm("group", evalInt("enable_grouping", 0, t));
 
     return changed;
 }

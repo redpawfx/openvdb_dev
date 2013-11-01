@@ -30,18 +30,33 @@
 //
 /// @file ValueTransformer.h
 ///
+/// @author Peter Cucka
+///
 /// tools::foreach() and tools::transformValues() transform the values in a grid
 /// by iterating over the grid with a user-supplied iterator and applying a
 /// user-supplied functor at each step of the iteration.  With tools::foreach(),
 /// the transformation is done in-place on the input grid, whereas with
 /// tools::transformValues(), transformed values are written to an output grid
 /// (which can, for example, have a different value type than the input grid).
-/// Both functions can optionally transform multiple values of the grid in
-/// parallel.
+/// Both functions can optionally transform multiple values of the grid in parallel.
+///
+/// tools::accumulate() can be used to accumulate the results of applying a functor
+/// at each step of a grid iteration.  (The functor is responsible for storing and
+/// updating intermediate results.)  When the iteration is done serially the behavior is
+/// the same as with tools::foreach(), but when multiple values are processed in parallel,
+/// an additional step is performed: when any two threads finish processing,
+/// @c op.join(otherOp) is called on one thread's functor to allow it to coalesce
+/// its intermediate result with the other thread's.
+///
+/// Finally, tools::setValueOnMin(), tools::setValueOnMax(), tools::setValueOnSum()
+/// and tools::setValueOnMult() are wrappers around Tree::modifyValue() (or
+/// ValueAccessor::modifyValue()) for some commmon in-place operations.
+/// These are typically significantly faster than calling getValue() followed by setValue().
 
 #ifndef OPENVDB_TOOLS_VALUETRANSFORMER_HAS_BEEN_INCLUDED
 #define OPENVDB_TOOLS_VALUETRANSFORMER_HAS_BEEN_INCLUDED
 
+#include <algorithm> // for std::min(), std::max()
 #include <tbb/parallel_for.h>
 #include <tbb/parallel_reduce.h>
 #include <openvdb/Types.h>
@@ -60,7 +75,7 @@ namespace tools {
 ///                  the type of @a iter
 /// @param threaded  if true, transform multiple values of the grid in parallel
 /// @param shareOp   if true and @a threaded is true, all threads use the same functor;
-///                  otherwise, each thread gets its own copy of the functor
+///                  otherwise, each thread gets its own copy of the @e original functor
 ///
 /// @par Example:
 /// Multiply all values (both set and unset) of a scalar, floating-point grid by two.
@@ -70,7 +85,7 @@ namespace tools {
 ///         iter.setValue(*iter * 2);
 ///     }
 /// };
-/// FloatGrid grid;
+/// FloatGrid grid = ...;
 /// tools::foreach(grid.beginValueAll(), Local::op);
 /// @endcode
 ///
@@ -87,7 +102,7 @@ namespace tools {
 ///     };
 /// }
 /// {
-///     VectorGrid grid;
+///     VectorGrid grid = ...;
 ///     tools::foreach(grid.beginValueOn(),
 ///         MatMul(math::rotation<math::Mat3s>(math::Y, M_PI_4)));
 /// }
@@ -116,7 +131,8 @@ inline void foreach(const IterT& iter, const XformOp& op,
 ///                  where @c InIterT is the type of @a inIter
 /// @param threaded  if true, transform multiple values of the input grid in parallel
 /// @param shareOp   if true and @a threaded is true, all threads use the same functor;
-///                  otherwise, each thread gets its own copy of the functor
+///                  otherwise, each thread gets its own copy of the @e original functor
+/// @param merge     how to merge intermediate results from multiple threads (see Types.h)
 ///
 /// @par Example:
 /// Populate a scalar floating-point grid with the lengths of the vectors from all
@@ -136,7 +152,7 @@ inline void foreach(const IterT& iter, const XformOp& op,
 ///         }
 ///     }
 /// };
-/// Vec3fGrid inGrid;
+/// Vec3fGrid inGrid = ...;
 /// FloatGrid outGrid;
 /// tools::transformValues(inGrid.cbeginValueOn(), outGrid, Local::op);
 /// @endcode
@@ -146,13 +162,164 @@ inline void foreach(const IterT& iter, const XformOp& op,
 /// with a tree::IteratorRange that wraps a grid or tree iterator.
 template<typename InIterT, typename OutGridT, typename XformOp>
 inline void transformValues(const InIterT& inIter, OutGridT& outGrid,
-    XformOp& op, bool threaded = true, bool shareOp = true);
+    XformOp& op, bool threaded = true, bool shareOp = true,
+    MergePolicy merge = MERGE_ACTIVE_STATES);
 
 #ifndef _MSC_VER
 template<typename InIterT, typename OutGridT, typename XformOp>
 inline void transformValues(const InIterT& inIter, OutGridT& outGrid,
-    const XformOp& op, bool threaded = true, bool shareOp = true);
+    const XformOp& op, bool threaded = true, bool shareOp = true,
+    MergePolicy merge = MERGE_ACTIVE_STATES);
 #endif
+
+
+/// Iterate over a grid and at each step call @c op(iter).  If threading is enabled,
+/// call @c op.join(otherOp) to accumulate intermediate results from pairs of threads.
+/// @param iter      an iterator over a grid or its tree (@c Grid::ValueOnCIter,
+///                  @c Tree::NodeIter, etc.)
+/// @param op        a functor with a join method of the form <tt>void join(XformOp&)</tt>
+///                  and a call method of the form <tt>void op(const IterT&)</tt>,
+///                  where @c IterT is the type of @a iter
+/// @param threaded  if true, transform multiple values of the grid in parallel
+/// @note If @a threaded is true, each thread gets its own copy of the @e original functor.
+/// The order in which threads are joined is unspecified.
+/// @note If @a threaded is false, the join method is never called.
+///
+/// @par Example:
+/// Compute the average of the active values of a scalar, floating-point grid
+/// using the math::Stats class.
+/// @code
+/// namespace {
+///     struct Average {
+///         math::Stats stats;
+///
+///         // Accumulate voxel and tile values into this functor's Stats object.
+///         inline void operator()(const FloatGrid::ValueOnCIter& iter) {
+///             if (iter.isVoxelValue()) stats.add(*iter);
+///             else stats.add(*iter, iter.getVoxelCount());
+///         }
+///
+///         // Accumulate another functor's Stats object into this functor's.
+///         inline void join(Average& other) { stats.add(other.stats); }
+///
+///         // Return the cumulative result.
+///         inline double average() const { return stats.mean(); }
+///     };
+/// }
+/// {
+///     FloatGrid grid = ...;
+///     Average op;
+///     tools::accumulate(grid.cbeginValueOn(), op);
+///     double average = op.average();
+/// }
+/// @endcode
+///
+/// @note For more complex operations that require finer control over threading,
+/// consider using @c tbb::parallel_for() or @c tbb::parallel_reduce() in conjunction
+/// with a tree::IteratorRange that wraps a grid or tree iterator.
+template<typename IterT, typename XformOp>
+inline void accumulate(const IterT& iter, XformOp& op, bool threaded = true);
+
+
+/// @brief Set the value of the voxel at the given coordinates in @a tree to
+/// the minimum of its current value and @a value, and mark the voxel as active.
+/// @details This is typically significantly faster than calling getValue()
+/// followed by setValueOn().
+/// @note @a TreeT can be either a Tree or a ValueAccessor.
+template<typename TreeT>
+inline void setValueOnMin(TreeT& tree, const Coord& xyz, const typename TreeT::ValueType& value);
+
+/// @brief Set the value of the voxel at the given coordinates in @a tree to
+/// the maximum of its current value and @a value, and mark the voxel as active.
+/// @details This is typically significantly faster than calling getValue()
+/// followed by setValueOn().
+/// @note @a TreeT can be either a Tree or a ValueAccessor.
+template<typename TreeT>
+inline void setValueOnMax(TreeT& tree, const Coord& xyz, const typename TreeT::ValueType& value);
+
+/// @brief Set the value of the voxel at the given coordinates in @a tree to
+/// the sum of its current value and @a value, and mark the voxel as active.
+/// @details This is typically significantly faster than calling getValue()
+/// followed by setValueOn().
+/// @note @a TreeT can be either a Tree or a ValueAccessor.
+template<typename TreeT>
+inline void setValueOnSum(TreeT& tree, const Coord& xyz, const typename TreeT::ValueType& value);
+
+/// @brief Set the value of the voxel at the given coordinates in @a tree to
+/// the product of its current value and @a value, and mark the voxel as active.
+/// @details This is typically significantly faster than calling getValue()
+/// followed by setValueOn().
+/// @note @a TreeT can be either a Tree or a ValueAccessor.
+template<typename TreeT>
+inline void setValueOnMult(TreeT& tree, const Coord& xyz, const typename TreeT::ValueType& value);
+
+
+////////////////////////////////////////
+
+
+namespace valxform {
+
+template<typename ValueType>
+struct MinOp {
+    const ValueType val;
+    MinOp(const ValueType& v): val(v) {}
+    inline void operator()(ValueType& v) const { v = std::min<ValueType>(v, val); }
+};
+
+template<typename ValueType>
+struct MaxOp {
+    const ValueType val;
+    MaxOp(const ValueType& v): val(v) {}
+    inline void operator()(ValueType& v) const { v = std::max<ValueType>(v, val); }
+};
+
+template<typename ValueType>
+struct SumOp {
+    const ValueType val;
+    SumOp(const ValueType& v): val(v) {}
+    inline void operator()(ValueType& v) const { v += val; }
+};
+
+template<typename ValueType>
+struct MultOp {
+    const ValueType val;
+    MultOp(const ValueType& v): val(v) {}
+    inline void operator()(ValueType& v) const { v *= val; }
+};
+
+}
+
+
+template<typename TreeT>
+inline void
+setValueOnMin(TreeT& tree, const Coord& xyz, const typename TreeT::ValueType& value)
+{
+    tree.modifyValue(xyz, valxform::MinOp<typename TreeT::ValueType>(value));
+}
+
+
+template<typename TreeT>
+inline void
+setValueOnMax(TreeT& tree, const Coord& xyz, const typename TreeT::ValueType& value)
+{
+    tree.modifyValue(xyz, valxform::MaxOp<typename TreeT::ValueType>(value));
+}
+
+
+template<typename TreeT>
+inline void
+setValueOnSum(TreeT& tree, const Coord& xyz, const typename TreeT::ValueType& value)
+{
+    tree.modifyValue(xyz, valxform::SumOp<typename TreeT::ValueType>(value));
+}
+
+
+template<typename TreeT>
+inline void
+setValueOnMult(TreeT& tree, const Coord& xyz, const typename TreeT::ValueType& value)
+{
+    tree.modifyValue(xyz, valxform::MultOp<typename TreeT::ValueType>(value));
+}
 
 
 ////////////////////////////////////////
@@ -257,12 +424,13 @@ public:
     typedef typename tree::IteratorRange<InIterT> IterRange;
     typedef typename OutTreeT::ValueType OutValueT;
 
-    SharedOpTransformer(const InIterT& inIter, OutTreeT& outTree, OpT& op):
+    SharedOpTransformer(const InIterT& inIter, OutTreeT& outTree, OpT& op, MergePolicy merge):
         mIsRoot(true),
         mInputIter(inIter),
         mInputTree(inIter.getTree()),
         mOutputTree(&outTree),
-        mOp(op)
+        mOp(op),
+        mMergePolicy(merge)
     {
         if (static_cast<const void*>(mInputTree) == static_cast<void*>(mOutputTree)) {
             OPENVDB_LOG_INFO("use tools::foreach(), not transformValues(),"
@@ -276,7 +444,8 @@ public:
         mInputIter(other.mInputIter),
         mInputTree(other.mInputTree),
         mOutputTree(new OutTreeT(zeroVal<OutValueT>())),
-        mOp(other.mOp)
+        mOp(other.mOp),
+        mMergePolicy(other.mMergePolicy)
         {}
 
     ~SharedOpTransformer()
@@ -317,7 +486,7 @@ public:
     void join(const SharedOpTransformer& other)
     {
         if (mOutputTree && other.mOutputTree) {
-            mOutputTree->merge(*other.mOutputTree);
+            mOutputTree->merge(*other.mOutputTree, mMergePolicy);
         }
     }
 
@@ -327,6 +496,7 @@ private:
     const InTreeT* mInputTree;
     OutTreeT* mOutputTree;
     OpT& mOp;
+    MergePolicy mMergePolicy;
 }; // class SharedOpTransformer
 
 
@@ -338,13 +508,15 @@ public:
     typedef typename tree::IteratorRange<InIterT> IterRange;
     typedef typename OutTreeT::ValueType OutValueT;
 
-    CopyableOpTransformer(const InIterT& inIter, OutTreeT& outTree, const OpT& op):
+    CopyableOpTransformer(const InIterT& inIter, OutTreeT& outTree,
+        const OpT& op, MergePolicy merge):
         mIsRoot(true),
         mInputIter(inIter),
         mInputTree(inIter.getTree()),
         mOutputTree(&outTree),
         mOp(op),
-        mOrigOp(&op)
+        mOrigOp(&op),
+        mMergePolicy(merge)
     {
         if (static_cast<const void*>(mInputTree) == static_cast<void*>(mOutputTree)) {
             OPENVDB_LOG_INFO("use tools::foreach(), not transformValues(),"
@@ -360,7 +532,8 @@ public:
         mInputTree(other.mInputTree),
         mOutputTree(new OutTreeT(zeroVal<OutValueT>())),
         mOp(*other.mOrigOp),
-        mOrigOp(other.mOrigOp)
+        mOrigOp(other.mOrigOp),
+        mMergePolicy(other.mMergePolicy)
         {}
 
     ~CopyableOpTransformer()
@@ -401,7 +574,7 @@ public:
     void join(const CopyableOpTransformer& other)
     {
         if (mOutputTree && other.mOutputTree) {
-            mOutputTree->merge(*other.mOutputTree);
+            mOutputTree->merge(*other.mOutputTree, mMergePolicy);
         }
     }
 
@@ -412,6 +585,7 @@ private:
     OutTreeT* mOutputTree;
     OpT mOp; // copy of original functor
     OpT const * const mOrigOp; // pointer to original functor
+    MergePolicy mMergePolicy;
 }; // class CopyableOpTransformer
 
 } // namespace valxform
@@ -423,17 +597,17 @@ private:
 template<typename InIterT, typename OutGridT, typename XformOp>
 inline void
 transformValues(const InIterT& inIter, OutGridT& outGrid, XformOp& op,
-    bool threaded, bool shared)
+    bool threaded, bool shared, MergePolicy merge)
 {
     typedef TreeAdapter<OutGridT> Adapter;
     typedef typename Adapter::TreeType OutTreeT;
     if (shared) {
         typedef typename valxform::SharedOpTransformer<InIterT, OutTreeT, XformOp> Processor;
-        Processor proc(inIter, Adapter::tree(outGrid), op);
+        Processor proc(inIter, Adapter::tree(outGrid), op, merge);
         proc.process(threaded);
     } else {
         typedef typename valxform::CopyableOpTransformer<InIterT, OutTreeT, XformOp> Processor;
-        Processor proc(inIter, Adapter::tree(outGrid), op);
+        Processor proc(inIter, Adapter::tree(outGrid), op, merge);
         proc.process(threaded);
     }
 }
@@ -442,16 +616,85 @@ transformValues(const InIterT& inIter, OutGridT& outGrid, XformOp& op,
 template<typename InIterT, typename OutGridT, typename XformOp>
 inline void
 transformValues(const InIterT& inIter, OutGridT& outGrid, const XformOp& op,
-    bool threaded, bool /*share*/)
+    bool threaded, bool /*share*/, MergePolicy merge)
 {
     typedef TreeAdapter<OutGridT> Adapter;
     typedef typename Adapter::TreeType OutTreeT;
     // Const ops are shared across threads, not copied.
     typedef typename valxform::SharedOpTransformer<InIterT, OutTreeT, const XformOp> Processor;
-    Processor proc(inIter, Adapter::tree(outGrid), op);
+    Processor proc(inIter, Adapter::tree(outGrid), op, merge);
     proc.process(threaded);
 }
 #endif
+
+
+////////////////////////////////////////
+
+
+namespace valxform {
+
+template<typename IterT, typename OpT>
+class OpAccumulator
+{
+public:
+    typedef typename tree::IteratorRange<IterT> IterRange;
+
+    // The root task makes a const copy of the original functor (mOrigOp)
+    // and keeps a pointer to the original functor (mOp), which it then modifies.
+    // Each subtask keeps a const pointer to the root task's mOrigOp
+    // and makes and then modifies a non-const copy (mOp) of it.
+    OpAccumulator(const IterT& iter, OpT& op):
+        mIsRoot(true),
+        mIter(iter),
+        mOp(&op),
+        mOrigOp(new OpT(op))
+    {}
+
+    // When splitting this task, give the subtask a copy of the original functor,
+    // not of this task's functor, which might have been modified arbitrarily.
+    OpAccumulator(OpAccumulator& other, tbb::split):
+        mIsRoot(false),
+        mIter(other.mIter),
+        mOp(new OpT(*other.mOrigOp)),
+        mOrigOp(other.mOrigOp)
+    {}
+
+    ~OpAccumulator() { if (mIsRoot) delete mOrigOp; else delete mOp; }
+
+    void process(bool threaded = true)
+    {
+        IterRange range(mIter);
+        if (threaded) {
+            tbb::parallel_reduce(range, *this);
+        } else {
+            (*this)(range);
+        }
+    }
+
+    void operator()(IterRange& r) { for ( ; r; ++r) (*mOp)(r.iterator()); }
+
+    void join(OpAccumulator& other) { mOp->join(*other.mOp); }
+
+private:
+    bool mIsRoot;
+    IterT mIter;
+    OpT* mOp; // pointer to original functor, which might get modified
+    OpT const * const mOrigOp; // const copy of original functor
+}; // class OpAccumulator
+
+} // namespace valxform
+
+
+////////////////////////////////////////
+
+
+template<typename IterT, typename XformOp>
+inline void
+accumulate(const IterT& iter, XformOp& op, bool threaded)
+{
+    typename valxform::OpAccumulator<IterT, XformOp> proc(iter, op);
+    proc.process(threaded);
+}
 
 } // namespace tools
 } // namespace OPENVDB_VERSION_NAME

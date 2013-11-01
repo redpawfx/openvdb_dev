@@ -36,7 +36,10 @@
 #define OPENVDB_HOUDINI_GEOMETRY_UTIL_HAS_BEEN_INCLUDED
 
 #include <openvdb/Types.h>
+#include <openvdb/tools/VolumeToMesh.h>
+#include <openvdb/tools/MeshToVolume.h>
 #include <openvdb/util/Util.h>
+
 #include <GA/GA_SplittableRange.h>
 #include <GU/GU_Detail.h>
 #include <boost/shared_ptr.hpp>
@@ -45,10 +48,22 @@
 
 namespace openvdb_houdini {
 
-/// Add geometry to the given detail to indicate the extents of a frustum transform.
+
+/// @brief  Add geometry to the given detail to indicate the extents
+///         of a frustum transform.
 OPENVDB_HOUDINI_API
 void drawFrustum(GU_Detail&, const openvdb::math::Transform&,
     const UT_Vector3* boxColor, const UT_Vector3* tickColor, bool shaded);
+
+
+////////////////////////////////////////
+
+
+/// @brief  Utility method to check if a point is referenced by primitives
+///         from a certain primitive group.
+OPENVDB_HOUDINI_API
+bool pointInPrimGroup(
+    GA_Offset ptnOffset, GU_Detail& geo, const GA_PrimitiveGroup& group);
 
 
 ////////////////////////////////////////
@@ -66,7 +81,8 @@ validateGeometry(const GU_Detail& geometry, std::string& warning, Interrupter*);
 ////////////////////////////////////////
 
 
-/// Threaded transform and copy of points.
+/// @brief  TBB body object for threaded world to voxel space
+///         transformation and copy of points.
 class OPENVDB_HOUDINI_API TransformOp
 {
 public:
@@ -86,7 +102,8 @@ private:
 ////////////////////////////////////////
 
 
-/// Threaded primitive copy (converts to custom representation)
+/// @brief  TBB body object for threaded primitive copy.
+/// @note   Produces a primitive-vertex index list.
 class OPENVDB_HOUDINI_API PrimCpyOp
 {
 public:
@@ -102,15 +119,19 @@ private:
 ////////////////////////////////////////
 
 
+/// @brief  TBB body object for threaded vertex normal generation.
+/// @note   Averages face normals from all similarly oriented primitives,
+///         that share the same vertex-point, to maintain sharp features.
 class OPENVDB_HOUDINI_API VertexNormalOp
 {
 public:
-    VertexNormalOp(GU_Detail&, const GA_PrimitiveGroup *interiorPrims = NULL);
+    VertexNormalOp(GU_Detail&, const GA_PrimitiveGroup *interiorPrims = NULL, float angle = 0.7);
     void operator()(const GA_SplittableRange&) const;
 private:
     const GU_Detail& mDetail;
     const GA_PrimitiveGroup *mInteriorPrims;
     GA_RWHandleV3 mNormalHandle;
+    const float mAngle;
 
     bool isInteriorPrim(GA_Offset primOffset) const
     {
@@ -119,7 +140,134 @@ private:
     }
 };
 
+
+////////////////////////////////////////
+
+
+/// @brief  TBB body object for threaded sharp feature construction.
+class OPENVDB_HOUDINI_API SharpenFeaturesOp
+{
+public:
+    typedef openvdb::tools::MeshToVoxelEdgeData EdgeData;
+
+    SharpenFeaturesOp(GU_Detail& meshGeo, const GU_Detail& refGeo, EdgeData& edgeData,
+        const openvdb::math::Transform& xform, const GA_PrimitiveGroup *surfacePrims = NULL,
+        const openvdb::BoolTree * mask = NULL);
+
+    void operator()(const GA_SplittableRange&) const;
+
+private:
+    GU_Detail& mMeshGeo;
+    const GU_Detail& mRefGeo;
+    EdgeData& mEdgeData;
+    const openvdb::math::Transform& mXForm;
+    const GA_PrimitiveGroup *mSurfacePrims;
+    const openvdb::BoolTree * mMaskTree;
+};
+
+
+////////////////////////////////////////
+
+
+/// @brief  TBB body object for threaded sharp feature construction.
+template <typename IndexTreeType, typename BoolTreeType>
+class GenAdaptivityMaskOp
+{
+public:
+    typedef openvdb::tree::LeafManager<BoolTreeType> BoolLeafManager;
+
+    GenAdaptivityMaskOp(const GU_Detail& refGeo,
+        const IndexTreeType& indexTree, BoolLeafManager& leafs, float edgetolerance = 0.0);
+
+    void run(bool threaded = true);
+
+    void operator()(const tbb::blocked_range<size_t> &range) const;
+
+private:
+    const GU_Detail& mRefGeo;
+    const IndexTreeType& mIndexTree;
+    BoolLeafManager& mLeafs;
+    float mEdgeTolerance;
+};
+
+
+template <typename IndexTreeType, typename BoolTreeType>
+GenAdaptivityMaskOp<IndexTreeType, BoolTreeType>::GenAdaptivityMaskOp(const GU_Detail& refGeo,
+    const IndexTreeType& indexTree, BoolLeafManager& leafs, float edgetolerance)
+    : mRefGeo(refGeo)
+    , mIndexTree(indexTree)
+    , mLeafs(leafs)
+    , mEdgeTolerance(edgetolerance)
+{
+    mEdgeTolerance = std::max(0.0f, mEdgeTolerance);
+    mEdgeTolerance = std::min(1.0f, mEdgeTolerance);
+}
+
+
+template <typename IndexTreeType, typename BoolTreeType>
+void
+GenAdaptivityMaskOp<IndexTreeType, BoolTreeType>::run(bool threaded)
+{
+    if (threaded) {
+        tbb::parallel_for(mLeafs.getRange(), *this);
+    } else {
+        (*this)(mLeafs.getRange());
+    }
+}
+
+
+template <typename IndexTreeType, typename BoolTreeType>
+void
+GenAdaptivityMaskOp<IndexTreeType, BoolTreeType>::operator()(const tbb::blocked_range<size_t> &range) const
+{
+    typedef typename openvdb::tree::ValueAccessor<const IndexTreeType> IndexAccessorType;
+    IndexAccessorType idxAcc(mIndexTree);
+
+    UT_Vector3 tmpN, normal;
+    GA_Offset primOffset;
+    int tmpIdx;
+
+    openvdb::Coord ijk, nijk;
+    typename BoolTreeType::LeafNodeType::ValueOnIter iter;
+
+    for (size_t n = range.begin(); n < range.end(); ++n) {
+        iter = mLeafs.leaf(n).beginValueOn();
+        for (; iter; ++iter) {
+            ijk = iter.getCoord();
+            
+            bool edgeVoxel = false;
+
+            int idx = idxAcc.getValue(ijk);
+
+            primOffset = mRefGeo.primitiveOffset(idx);
+            normal = mRefGeo.getGEOPrimitive(primOffset)->computeNormal();
+
+            for (size_t i = 0; i < 18; ++i) {
+                nijk = ijk + openvdb::util::COORD_OFFSETS[i];
+                if (idxAcc.probeValue(nijk, tmpIdx) && tmpIdx != idx) {
+                    primOffset = mRefGeo.primitiveOffset(tmpIdx);
+                    tmpN = mRefGeo.getGEOPrimitive(primOffset)->computeNormal();
+
+                    if (normal.dot(tmpN) < mEdgeTolerance) {
+                        edgeVoxel = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!edgeVoxel) iter.setValueOff();
+        }
+    }
+}
+
+
+
 } // namespace openvdb_houdini
+
+
+
+
+////////////////////////////////////////
 
 
 #if (UT_VERSION_INT < 0x0c0500F5) // Prior to 12.5.245
@@ -182,9 +330,12 @@ using GU_Convert_H12_5::GUconvertCopySingleVertexPrimAttribsAndGroups;
 
 #endif // Prior to 12.5.245
 
+
 ////////////////////////////////////////
 
+
 #endif // OPENVDB_HOUDINI_GEOMETRY_UTIL_HAS_BEEN_INCLUDED
+
 
 // Copyright (c) 2012-2013 DreamWorks Animation LLC
 // All rights reserved. This software is distributed under the

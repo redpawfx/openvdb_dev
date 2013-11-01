@@ -37,12 +37,39 @@ namespace math {
 
 
 OPENVDB_API Vec3d
-closestPointOnTriangleToPoint(const Vec3d& a, const Vec3d& b, const Vec3d& c,
-    const Vec3d& p, Vec3d& uvw)
+closestPointOnTriangleToPoint(
+    const Vec3d& a, const Vec3d& b, const Vec3d& c, const Vec3d& p, Vec3d& uvw)
 {
+    uvw.setZero();
+
+    // degenerate triangle, singular
+    if ((isApproxEqual(a, b) && isApproxEqual(a, c))) {
+        uvw[0] = 1.0;
+        return a; 
+    }
+
     Vec3d ab = b - a, ac = c - a, ap = p - a;
     double d1 = ab.dot(ap), d2 = ac.dot(ap);
-    uvw.setZero();
+
+    // degenerate triangle edges
+    if (isApproxEqual(a, b)) {
+
+        double t = 0.0;
+        Vec3d cp = closestPointOnSegmentToPoint(a, c, p, t);
+        
+        uvw[0] = 1.0 - t;
+        uvw[2] = t;
+
+        return cp;
+
+    } else if (isApproxEqual(a, c) || isApproxEqual(b, c)) {
+
+        double t = 0.0;
+        Vec3d cp = closestPointOnSegmentToPoint(a, b, p, t);
+        uvw[0] = 1.0 - t;
+        uvw[1] = t;
+        return cp;
+    }
 
     if (d1 <= 0.0 && d2 <= 0.0) {
         uvw[0] = 1.0;
@@ -98,6 +125,33 @@ closestPointOnTriangleToPoint(const Vec3d& a, const Vec3d& b, const Vec3d& c,
     return a + ab*uvw[1] + ac*uvw[2]; // = u*a + v*b + w*c , u= va*denom = 1.0-v-w 
 }
 
+
+OPENVDB_API Vec3d
+closestPointOnSegmentToPoint(const Vec3d& a, const Vec3d& b, const Vec3d& p, double& t)
+{
+    Vec3d ab = b - a;
+    t = (p - a).dot(ab);
+
+    if (t <= 0.0) {
+        // c projects outside the [a,b] interval, on the a side.
+        t = 0.0;
+        return a;
+    } else {
+
+        // always nonnegative since denom = ||ab||^2
+        double denom = ab.dot(ab);
+
+        if (t >= denom) {
+            // c projects outside the [a,b] interval, on the b side.
+            t = 1.0;
+            return b;
+        } else {
+            // c projects inside the [a,b] interval.
+            t = t / denom;
+            return a + (ab * t); 
+        }
+    }
+}
 
 ////////////////////////////////////////
 

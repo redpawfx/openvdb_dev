@@ -124,7 +124,7 @@ TestMeshToVolume::testVoxelizer()
 
     {
         MeshVoxelizer voxelizer(pointList, polygonList);
-        voxelizer.runParallel();
+        voxelizer.run();
 
         // Check for mesh intersecting voxels
         CPPUNIT_ASSERT(13== voxelizer.intersectionTree().activeVoxelCount());
@@ -141,7 +141,7 @@ TestMeshToVolume::testVoxelizer()
 
     {
         MeshVoxelizer voxelizer(pointList, polygonList);
-        voxelizer.runParallel();
+        voxelizer.run();
 
         // Check for mesh intersecting voxels
         CPPUNIT_ASSERT(16 == voxelizer.intersectionTree().activeVoxelCount());
@@ -158,7 +158,7 @@ TestMeshToVolume::testVoxelizer()
 
     {
         MeshVoxelizer voxelizer(pointList, polygonList);
-        voxelizer.runParallel();
+        voxelizer.run();
 
         // Check for mesh intersecting voxels
         CPPUNIT_ASSERT(16 == voxelizer.intersectionTree().activeVoxelCount());
@@ -180,7 +180,7 @@ TestMeshToVolume::testVoxelizer()
 
     {
         MeshVoxelizer voxelizer(pointList, polygonList);
-        voxelizer.runParallel();
+        voxelizer.run();
 
         // Check for 28 mesh intersecting voxels
         CPPUNIT_ASSERT(28 == voxelizer.intersectionTree().activeVoxelCount());
@@ -208,7 +208,7 @@ TestMeshToVolume::testPrimitiveVoxelRatio()
     openvdb::tools::internal::MeshVoxelizer<openvdb::FloatTree>
         voxelizer(pointList, polygonList);
 
-    voxelizer.runParallel();
+    voxelizer.run();
 
     CPPUNIT_ASSERT(0 != voxelizer.intersectionTree().activeVoxelCount());
 }
@@ -246,7 +246,7 @@ TestMeshToVolume::testIntersectingVoxelCleaner()
         openvdb::tools::internal::IntersectingVoxelCleaner<openvdb::FloatTree>
             cleaner(distTree, indexTree, intersectionTree, leafs);
 
-        cleaner.runParallel();
+        cleaner.run();
     }
 
     CPPUNIT_ASSERT(numSDFVoxels == distTree.activeVoxelCount());
@@ -271,7 +271,7 @@ TestMeshToVolume::testIntersectingVoxelCleaner()
         openvdb::tools::internal::IntersectingVoxelCleaner<openvdb::FloatTree>
             cleaner(distTree, indexTree, intersectionTree, leafs);
 
-        cleaner.runParallel();
+        cleaner.run();
     }
 
     CPPUNIT_ASSERT(numSDFVoxels == distTree.activeVoxelCount());
@@ -312,7 +312,7 @@ TestMeshToVolume::testShellVoxelCleaner()
         openvdb::tools::internal::ShellVoxelCleaner<openvdb::FloatTree>
             cleaner(distTree, leafs, indexTree, intersectionTree);
 
-        cleaner.runParallel();
+        cleaner.run();
     }
 
     CPPUNIT_ASSERT(numSDFVoxels == distTree.activeVoxelCount());
@@ -327,7 +327,7 @@ TestMeshToVolume::testShellVoxelCleaner()
         openvdb::tools::internal::ShellVoxelCleaner<openvdb::FloatTree>
             cleaner(distTree, leafs, indexTree, intersectionTree);
 
-        cleaner.runParallel();
+        cleaner.run();
     }
 
     CPPUNIT_ASSERT(0 == distTree.activeVoxelCount());
