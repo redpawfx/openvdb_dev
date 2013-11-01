@@ -16,6 +16,7 @@ INCLUDE_DIRECTORIES ( ${TBB_INCLUDE_DIR} )
 INCLUDE_DIRECTORIES ( ${GLFW_INCLUDE_DIR} )
 INCLUDE_DIRECTORIES ( ${GLEW_INCLUDE_DIR} )
 INCLUDE_DIRECTORIES ( ${CMAKE_SOURCE_DIR}/.. )
+INCLUDE_DIRECTORIES ( . )
 
 IF (WIN32)
   ADD_DEFINITIONS (
@@ -30,23 +31,28 @@ ELSE ()
 ENDIF ()
 
 ADD_LIBRARY ( openvdb SHARED
-  Grid.cc
-  io/Archive.cc
-  io/Compression.cc
-  io/File.cc
-  io/GridDescriptor.cc
-  io/Stream.cc
-  math/Hermite.cc
-  math/Maps.cc
-  math/Proximity.cc
-  math/QuantizedUnitVec.cc
-  math/Transform.cc
-  metadata/Metadata.cc
-  metadata/MetaMap.cc
-  openvdb.cc
-  Platform.cc
-  util/Formats.cc
-  util/Util.cc
+  ./Grid.cc
+  ./io/Archive.cc
+  ./io/Compression.cc
+  ./io/File.cc
+  ./io/GridDescriptor.cc
+  ./io/Stream.cc
+  ./math/Hermite.cc
+  ./math/Maps.cc
+  ./math/Proximity.cc
+  ./math/QuantizedUnitVec.cc
+  ./math/Transform.cc
+  ./metadata/Metadata.cc
+  ./metadata/MetaMap.cc
+  ./openvdb.cc
+  ./Platform.cc
+  ./util/Formats.cc
+  ./util/Util.cc
+  ./viewer/Camera.cc
+  ./viewer/ClipBox.cc
+  ./viewer/Font.cc
+  ./viewer/RenderModules.cc
+  ./viewer/Viewer.cc
   )
 
 IF (WIN32)
@@ -74,8 +80,6 @@ ADD_EXECUTABLE ( vdb_print
 
 ADD_EXECUTABLE ( vdb_view
   cmd/openvdb_view/main.cc
-  cmd/openvdb_view/RenderModules.cc
-  cmd/openvdb_view/Viewer.cc
 )
 
 SET_TARGET_PROPERTIES ( vdb_view
@@ -92,6 +96,10 @@ SET ( APPLICATIONS_DEPENDENT_LIBRARIES
 
 TARGET_LINK_LIBRARIES ( vdb_print
   ${APPLICATIONS_DEPENDENT_LIBRARIES}
+  ${GLFW_glfw_LIBRARY}
+  ${GLEW_GLEW_LIBRARY}
+  ${OPENGL_gl_LIBRARY}
+  ${OPENGL_glu_LIBRARY}
   )
 
 TARGET_LINK_LIBRARIES ( vdb_view
