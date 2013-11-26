@@ -211,6 +211,8 @@ public:
     Index64 offVoxelCount() const { return mValueMask.countOff(); }
     Index64 onLeafVoxelCount() const { return onVoxelCount(); }
     Index64 offLeafVoxelCount() const { return offVoxelCount(); }
+    static Index64 onTileCount()  { return 0; }
+    static Index64 offTileCount() { return 0; }
     /// Return @c true if this node has no active voxels.
     bool isEmpty() const { return mValueMask.isOff(); }
     /// Return @c true if this node contains only active voxels.
@@ -220,7 +222,7 @@ public:
     Index64 memUsage() const;
 
     /// Expand the given bounding box so that it includes this leaf node's active voxels.
-    /// If visitVoxels is false this LeafNode will be approximated as dense, i.e. with all 
+    /// If visitVoxels is false this LeafNode will be approximated as dense, i.e. with all
     /// voxels active. Else the individual active voxels are visited to produce a tight bbox.
     void evalActiveBoundingBox(CoordBBox&, bool visitVoxels = true) const;
     OPENVDB_DEPRECATED void evalActiveVoxelBoundingBox(CoordBBox&) const;
@@ -716,8 +718,8 @@ public:
 
     /// @brief Difference this node's set of active values with the active values
     /// of the other node, whose @c ValueType may be different. So a
-    /// resulting voxel will be active only if both of the original
-    /// voxel is active in this LeafNode and inactive in the other LeafNode.
+    /// resulting voxel will be active only if the original voxel is
+    /// active in this LeafNode and inactive in the other LeafNode.
     ///
     /// @details The last dummy argument is required to match the signature
     /// for InternalNode::topologyDifference.
@@ -962,10 +964,10 @@ template<typename T, Index Log2Dim>
 inline Index
 LeafNode<T, Log2Dim>::coordToOffset(const Coord& xyz)
 {
-    assert ((xyz[0]&DIM-1u)<DIM && (xyz[1]&DIM-1u)<DIM && (xyz[2]&DIM-1u)<DIM);
-    return ((xyz[0]&DIM-1u)<<2*Log2Dim)
-        +  ((xyz[1]&DIM-1u)<<  Log2Dim)
-        +   (xyz[2]&DIM-1u);
+    assert ((xyz[0] & (DIM-1u)) < DIM && (xyz[1] & (DIM-1u)) < DIM && (xyz[2] & (DIM-1u)) < DIM);
+    return ((xyz[0] & (DIM-1u)) << 2*Log2Dim)
+        +  ((xyz[1] & (DIM-1u)) <<  Log2Dim)
+        +   (xyz[2] & (DIM-1u));
 }
 
 template<typename T, Index Log2Dim>
@@ -1086,11 +1088,11 @@ inline void
 LeafNode<T, Log2Dim>::fill(const CoordBBox& bbox, const ValueType& value, bool active)
 {
     for (Int32 x = bbox.min().x(); x <= bbox.max().x(); ++x) {
-        const Index offsetX = (x&DIM-1u)<<2*Log2Dim;
+        const Index offsetX = (x & (DIM-1u)) << 2*Log2Dim;
         for (Int32 y = bbox.min().y(); y <= bbox.max().y(); ++y) {
-            const Index offsetXY = offsetX + ((y&DIM-1u)<<  Log2Dim);
+            const Index offsetXY = offsetX + ((y & (DIM-1u)) << Log2Dim);
             for (Int32 z = bbox.min().z(); z <= bbox.max().z(); ++z) {
-                const Index offset = offsetXY + (z&DIM-1u);
+                const Index offset = offsetXY + (z & (DIM-1u));
                 mBuffer[offset] = value;
                 mValueMask.set(offset, active);
             }
@@ -1113,27 +1115,34 @@ LeafNode<T, Log2Dim>::fill(const ValueType& value, bool active)
     mValueMask.set(active);
 }
 
+
 ////////////////////////////////////////
+
 
 template<typename T, Index Log2Dim>
 template<typename DenseT>
 inline void
 LeafNode<T, Log2Dim>::copyToDense(const CoordBBox& bbox, DenseT& dense) const
 {
-    const size_t xStride = dense.xStride(), yStride = dense.yStride();// zStride=1
+    typedef typename DenseT::ValueType DenseValueType;
+
+    const size_t xStride = dense.xStride(), yStride = dense.yStride(), zStride = dense.zStride();
     const Coord& min = dense.bbox().min();
-    T* t0 = dense.data() + bbox.min()[2]-min[2];//target array
-    const T* s0 = &mBuffer[bbox.min()[2]&DIM-1u];//source array
-    for (Int32 x = bbox.min()[0], ex=bbox.max()[0]+1; x<ex; ++x) {
-        T* t1 = t0 + xStride*(x-min[0]);
-        const T* s1 = s0 + ((x&DIM-1u)<<2*Log2Dim);
-        for (Int32 y = bbox.min()[1], ey=bbox.max()[1]+1; y<ey; ++y) {
-            T* t2 = t1 + yStride*(y-min[1]);
-            const T* s2 = s1 + ((y&DIM-1u)<<Log2Dim);
-            for (Int32 z = bbox.min()[2], ez=bbox.max()[2]+1; z<ez ; ++z) *t2++ = *s2++;
+    DenseValueType* t0 = dense.data() + zStride * (bbox.min()[2] - min[2]); // target array
+    const T* s0 = &mBuffer[bbox.min()[2] & (DIM-1u)]; // source array
+    for (Int32 x = bbox.min()[0], ex = bbox.max()[0] + 1; x < ex; ++x) {
+        DenseValueType* t1 = t0 + xStride * (x - min[0]);
+        const T* s1 = s0 + ((x & (DIM-1u)) << 2*Log2Dim);
+        for (Int32 y = bbox.min()[1], ey = bbox.max()[1] + 1; y < ey; ++y) {
+            DenseValueType* t2 = t1 + yStride * (y - min[1]);
+            const T* s2 = s1 + ((y & (DIM-1u)) << Log2Dim);
+            for (Int32 z = bbox.min()[2], ez = bbox.max()[2] + 1; z < ez; ++z, t2 += zStride) {
+                *t2 = DenseValueType(*s2++);
+            }
         }
     }
 }
+
 
 template<typename T, Index Log2Dim>
 template<typename DenseT>
@@ -1141,29 +1150,32 @@ inline void
 LeafNode<T, Log2Dim>::copyFromDense(const CoordBBox& bbox, const DenseT& dense,
                                     const ValueType& background, const ValueType& tolerance)
 {
-    const size_t xStride = dense.xStride(), yStride = dense.yStride();// zStride=1
+    typedef typename DenseT::ValueType DenseValueType;
+
+    const size_t xStride = dense.xStride(), yStride = dense.yStride(), zStride = dense.zStride();
     const Coord& min = dense.bbox().min();
 
-    const ValueType* s0 = dense.data() + bbox.min()[2]-min[2];//source
-    const Int32 n0 = bbox.min()[2]&DIM-1u;
-    for (Int32 x = bbox.min()[0], ex=bbox.max()[0]+1; x<ex; ++x) {
-        const ValueType* s1 = s0 + xStride*(x-min[0]);
-        const Int32 n1 = n0 + ((x&DIM-1u)<<2*LOG2DIM);
-        for (Int32 y = bbox.min()[1], ey=bbox.max()[1]+1; y<ey; ++y) {
-            const ValueType* s2 = s1 + yStride*(y-min[1]);
-            Int32 n2 = n1 + ((y&DIM-1u)<<LOG2DIM) ;
-            for (Int32 z = bbox.min()[2], ez=bbox.max()[2]+1; z<ez ; ++z, ++n2, ++s2) {
-                if (math::isApproxEqual(background, *s2, tolerance)) {
+    const DenseValueType* s0 = dense.data() + zStride * (bbox.min()[2] - min[2]); // source
+    const Int32 n0 = bbox.min()[2] & (DIM-1u);
+    for (Int32 x = bbox.min()[0], ex = bbox.max()[0]+1; x < ex; ++x) {
+        const DenseValueType* s1 = s0 + xStride * (x - min[0]);
+        const Int32 n1 = n0 + ((x & (DIM-1u)) << 2*LOG2DIM);
+        for (Int32 y = bbox.min()[1], ey = bbox.max()[1]+1; y < ey; ++y) {
+            const DenseValueType* s2 = s1 + yStride * (y - min[1]);
+            Int32 n2 = n1 + ((y & (DIM-1u)) << LOG2DIM);
+            for (Int32 z = bbox.min()[2], ez = bbox.max()[2]+1; z < ez; ++z, ++n2, s2 += zStride) {
+                if (math::isApproxEqual(background, ValueType(*s2), tolerance)) {
                     mValueMask.setOff(n2);
                     mBuffer[n2] = background;
                 } else {
                     mValueMask.setOn(n2);
-                    mBuffer[n2] = *s2;
+                    mBuffer[n2] = ValueType(*s2);
                 }
             }
         }
     }
 }
+
 
 ////////////////////////////////////////
 
@@ -1301,7 +1313,7 @@ LeafNode<T, Log2Dim>::isConstant(ValueType& constValue,
                                  bool& state, const ValueType& tolerance) const
 {
     state = mValueMask.isOn();
-    
+
     if (!(state || mValueMask.isOff())) return false;
 
     bool allEqual = true;

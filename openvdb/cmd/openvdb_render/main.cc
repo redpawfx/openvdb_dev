@@ -56,6 +56,7 @@
 #include <openvdb/tools/RayTracer.h>
 #ifdef DWA_OPENVDB
 #include <logging_base/logging.h>
+#include <usagetrack.h>
 #endif
 
 
@@ -72,6 +73,7 @@ struct RenderOpts
     openvdb::Vec3R rotate;
     openvdb::Vec3R translate;
     openvdb::Vec3R target;
+    openvdb::Vec3R up;
     bool lookat;
     size_t samples;
     size_t width, height;
@@ -90,6 +92,7 @@ struct RenderOpts
         rotate(0.0),
         translate(0.0),
         target(0.0),
+        up(0.0, 1.0, 0.0),
         lookat(false),
         samples(1),
         width(1920),
@@ -101,8 +104,8 @@ struct RenderOpts
 
     std::string validate() const
     {
-        if (shader != "diffuse" && shader != "matte" && shader != "normal") {
-            return "expected diffuse, matte or normal shader, got \"" + shader + "\"";
+        if (shader != "diffuse" && shader != "matte" && shader != "normal" && shader != "position"){
+            return "expected diffuse, matte, normal or position shader, got \"" + shader + "\"";
         }
         if (!boost::starts_with(camera, "ortho") && !boost::starts_with(camera, "persp")) {
             return "expected perspective or orthographic camera, got \"" + camera + "\"";
@@ -127,17 +130,14 @@ struct RenderOpts
            << " -far " << zfar
            << " -focal " << focal
            << " -frame " << frame;
-        if (lookat) {
-            os << " -lookat " << target[0] << "," << target[1] << "," << target[2];
-        }
+        if (lookat) os << " -lookat " << target[0] << "," << target[1] << "," << target[2];
         os << " -near " << znear
            << " -res " << width << "x" << height;
-        if (!lookat) {
-            os << " -rotate " << rotate[0] << "," << rotate[1] << "," << rotate[2];
-        }
+        if (!lookat) os << " -rotate " << rotate[0] << "," << rotate[1] << "," << rotate[2];
         os << " -shader " << shader
            << " -samples " << samples
            << " -translate " << translate[0] << "," << translate[1] << "," << translate[2];
+        if (lookat) os << " -up " << up[0] << "," << up[1] << "," << up[2];
         if (verbose) os << " -v";
         return os;
     }
@@ -158,7 +158,7 @@ usage(int exitStatus = EXIT_FAILURE)
 "Usage: " << gProgName << " in.vdb out.{exr,ppm} [options]\n" <<
 "Which: ray-traces OpenVDB volumes\n" <<
 "Options:\n" <<
-"    -aperture F       perspective camera aperture (default: " << opts.aperture << ")\n" <<
+"    -aperture F       perspective camera aperture in mm (default: " << opts.aperture << ")\n" <<
 "    -camera S         camera type; either \"persp[ective]\" or \"ortho[graphic]\"\n" <<
 "                      (default: " << opts.camera << ")\n" <<
 "    -compression S    EXR compression scheme; either \"none\" (uncompressed),\n" <<
@@ -166,30 +166,34 @@ usage(int exitStatus = EXIT_FAILURE)
 "    -cpus N           number of rendering threads, or 1 to disable threading,\n" <<
 "                      or 0 to use all available CPUs (default: " << opts.threads << ")\n" <<
 "    -far F            camera far plane depth (default: " << opts.zfar << ")\n" <<
-"    -focal F          perspective camera focal length (default: " << opts.focal << ")\n" <<
-"    -fov F            perspective camera field of view (default: " << fov << ")\n" <<
+"    -focal F          perspective camera focal length in mm (default: " << opts.focal << ")\n" <<
+"    -fov F            perspective camera field of view in degrees\n" <<
+"                      (default: " << fov << ")\n" <<
 "    -frame F          ortho camera frame width in world units (default: "
     << opts.frame << ")\n" <<
 "    -lookat X,Y,Z     rotate the camera to point to (X, Y, Z)\n" <<
 "    -name S           name of the grid to be rendered (default: render\n" <<
 "                      the first floating-point grid found in in.vdb)\n" <<
 "    -near F           camera near plane depth (default: " << opts.znear << ")\n" <<
-"    -res WxH          image width and height (default: "
+"    -res WxH          image dimensions in pixels (default: "
     << opts.width << "x" << opts.height << ")\n" <<
 "    -r X,Y,Z                                    \n" <<
 "    -rotate X,Y,Z     camera rotation in degrees\n" <<
-"    -shader S         shader name; either \"diffuse\", \"matte\" or \"normal\"\n" <<
-"                      (default: " << opts.shader << ")\n" <<
+"                      (default: look at the center of the grid)\n" <<
+"    -shader S         shader name; either \"diffuse\", \"matte\", \"normal\"\n" <<
+"                      or \"position\" (default: " << opts.shader << ")\n" <<
 "    -samples N        number of samples (rays) per pixel (default: " << opts.samples << ")\n" <<
 "    -t X,Y,Z                            \n" <<
 "    -translate X,Y,Z  camera translation\n" <<
+"    -up X,Y,Z         vector that should point up after rotation with -lookat\n" <<
+"                      (default: " << opts.up << ")\n" <<
 "\n" <<
 "    -v                verbose (print timing and diagnostics)\n" <<
 "    -h, -help         print this usage message and exit\n" <<
 "\n" <<
 "Example:\n" <<
 "    " << gProgName << " crawler.vdb crawler.exr -shader diffuse -res 1920x1080 \\\n" <<
-"        -focal 50 -translate 0,210.5,400 -compression rle -v\n" <<
+"        -focal 35 -samples 4 -translate 0,210.5,400 -compression rle -v\n" <<
 "\n" <<
 "This is not (and is not intended to be) a production-quality renderer,\n" <<
 "and it is currently limited to rendering level set volumes.\n";
@@ -233,15 +237,16 @@ saveEXR(const std::string& fname, const openvdb::tools::Film& film, const Render
     header.channels().insert("A", Imf::Channel(Imf::FLOAT));
 
     const size_t pixelBytes = sizeof(RGBA), rowBytes = pixelBytes * film.width();
+    RGBA& pixel0 = const_cast<RGBA*>(film.pixels())[0];
     Imf::FrameBuffer framebuffer;
-    framebuffer.insert("R", Imf::Slice(Imf::FLOAT,
-        (char*)(&(film.pixels()[0].r)), pixelBytes, rowBytes));
-    framebuffer.insert("G", Imf::Slice(Imf::FLOAT,
-        (char*)(&(film.pixels()[0].g)), pixelBytes, rowBytes));
-    framebuffer.insert("B", Imf::Slice(Imf::FLOAT,
-        (char*)(&(film.pixels()[0].b)), pixelBytes, rowBytes));
-    framebuffer.insert("A", Imf::Slice(Imf::FLOAT,
-        (char*)(&(film.pixels()[0].a)), pixelBytes, rowBytes));
+    framebuffer.insert("R",
+        Imf::Slice(Imf::FLOAT, reinterpret_cast<char*>(&pixel0.r), pixelBytes, rowBytes));
+    framebuffer.insert("G",
+        Imf::Slice(Imf::FLOAT, reinterpret_cast<char*>(&pixel0.g), pixelBytes, rowBytes));
+    framebuffer.insert("B",
+        Imf::Slice(Imf::FLOAT, reinterpret_cast<char*>(&pixel0.b), pixelBytes, rowBytes));
+    framebuffer.insert("A",
+        Imf::Slice(Imf::FLOAT, reinterpret_cast<char*>(&pixel0.a), pixelBytes, rowBytes));
 
     Imf::OutputFile imgFile(filename.c_str(), header);
     imgFile.setFrameBuffer(framebuffer);
@@ -280,7 +285,7 @@ render(const GridType& grid, const std::string& imgFilename, const RenderOpts& o
         OPENVDB_THROW(ValueError,
             "expected perspective or orthographic camera, got \"" << opts.camera << "\"");
     }
-    if (opts.lookat) camera->lookAt(opts.target);
+    if (opts.lookat) camera->lookAt(opts.target, opts.up);
 
     boost::scoped_ptr<tools::BaseShader> shader;
     if (opts.shader == "diffuse") {
@@ -289,9 +294,13 @@ render(const GridType& grid, const std::string& imgFilename, const RenderOpts& o
         shader.reset(new tools::MatteShader);
     } else if (opts.shader == "normal") {
         shader.reset(new tools::NormalShader);
+    } else if (opts.shader == "position") {
+        const CoordBBox b = grid.evalActiveVoxelBoundingBox();
+        math::BBox<openvdb::Vec3R> bbox(b.min().asVec3d(), b.max().asVec3d());
+        shader.reset(new tools::PositionShader(bbox.applyMap(*(grid.transform().baseMap()))));
     } else {
         OPENVDB_THROW(ValueError,
-            "expected diffuse, matte or normal shader, got \"" << opts.shader << "\"");
+            "expected diffuse, matte, normal or position shader, got \"" << opts.shader << "\"");
     }
 
     if (opts.verbose) {
@@ -373,16 +382,17 @@ struct OptParse
 int
 main(int argc, char *argv[])
 {
-    int retcode = EXIT_SUCCESS;
+#ifdef DWA_OPENVDB
+    USAGETRACK_report_basic_tool_usage(argc, argv, /*duration=*/0);
+    logging_base::configure(argc, argv);
+#endif
 
     OPENVDB_START_THREADSAFE_STATIC_WRITE
     gProgName = argv[0];
     if (const char* ptr = ::strrchr(gProgName, '/')) gProgName = ptr + 1;
     OPENVDB_FINISH_THREADSAFE_STATIC_WRITE
 
-#ifdef DWA_OPENVDB
-    logging_base::configure(argc, argv);
-#endif
+    int retcode = EXIT_SUCCESS;
 
     if (argc == 1) usage();
 
@@ -449,6 +459,9 @@ main(int argc, char *argv[])
             } else if (parser.check(i, "-t") || parser.check(i, "-translate")) {
                 ++i;
                 opts.translate = strToVec3R(argv[i]);
+            } else if (parser.check(i, "-up")) {
+                ++i;
+                opts.up = strToVec3R(argv[i]);
             } else if (arg == "-v") {
                 opts.verbose = true;
             } else if (arg == "-h" || arg == "-help" || arg == "--help") {

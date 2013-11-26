@@ -90,7 +90,7 @@ protected:
     OP_ERROR evalFilterParms(OP_Context&, GU_Detail&, FilterParmVec&);
 
     virtual OP_ERROR cookMySop(OP_Context&);
-    virtual unsigned disableParms();
+    virtual bool updateParmsFlags();
 
 private:
     struct FilterOp;
@@ -249,10 +249,10 @@ SOP_OpenVDB_Filter::registerSop(OP_OperatorTable* table)
 
 
 // Disable UI Parms.
-unsigned
-SOP_OpenVDB_Filter::disableParms()
+bool
+SOP_OpenVDB_Filter::updateParmsFlags()
 {
-    unsigned changed = 0;
+    bool changed = false;
 
     // currently no support for masks
     //setVisibleState("maskGroup1", getEnableState("maskGroup1"));
@@ -266,14 +266,14 @@ SOP_OpenVDB_Filter::disableParms()
 #ifndef SESI_OPENVDB
     // Disable and hide unused parameters.
     bool enable = (op == OP_MEAN || op == OP_GAUSS || op == OP_MEDIAN);
-    changed += enableParm("iterations", enable);
-    changed += enableParm("radius", enable);
-    setVisibleState("iterations", enable);
-    setVisibleState("radius", enable);
+    changed |= enableParm("iterations", enable);
+    changed |= enableParm("radius", enable);
+    changed |= setVisibleState("iterations", enable);
+    changed |= setVisibleState("radius", enable);
 
     enable = (op == OP_OFFSET);
-    changed += enableParm("offset", enable);
-    setVisibleState("offset", enable);
+    changed |= enableParm("offset", enable);
+    changed |= setVisibleState("offset", enable);
 #endif
 
     return changed;
@@ -293,8 +293,9 @@ struct SOP_OpenVDB_Filter::FilterOp
     void operator()(GridT& grid)
     {
         typedef typename GridT::ValueType ValueT;
+        typedef openvdb::FloatGrid MaskT;
 
-        openvdb::tools::Filter<GridT, hvdb::Interrupter> filter(grid, interrupt);
+        openvdb::tools::Filter<GridT, MaskT, hvdb::Interrupter> filter(grid, interrupt);
 
         for (size_t i = 0, N = opSequence.size(); i < N; ++i) {
             if (interrupt && interrupt->wasInterrupted()) return;
@@ -303,7 +304,7 @@ struct SOP_OpenVDB_Filter::FilterOp
             switch (parms.op) {
 #ifndef SESI_OPENVDB
             case OP_OFFSET:
-                filter.offset(parms.offset);
+                filter.offset(static_cast<ValueT>(parms.offset));
                 break;
 #endif
             case OP_MEAN:
