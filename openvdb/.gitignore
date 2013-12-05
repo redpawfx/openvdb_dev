@@ -1,0 +1,8 @@
+/RELEASE/
+*.o
+/vdb_print
+/vdb_render
+/vdb_test
+/vdb_view
+/openvdb_viewer
+/*.so*

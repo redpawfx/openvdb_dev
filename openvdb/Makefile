@@ -79,15 +79,15 @@
 #
 
 # The directory into which to install libraries, executables and header files
-INSTALL_DIR := /Volumes/sv-dev01/devRepo/johnc/3rdParty/github/redpawFX/openvdb_dev/openvdb/RELEASE/
+INSTALL_DIR := ./RELEASE/OpenVDB
 
 # The parent directory of the boost/ header directory
-BOOST_INCL_DIR := /usr/include/
+BOOST_INCL_DIR := $(HT)/include
 
 # The parent directory of the OpenEXR/ header directory
-EXR_INCL_DIR := /usr/include/
+EXR_INCL_DIR := $(HT)/include
 # The directory containing libIlmImf, libIlmThread, etc.
-EXR_LIB_DIR := /usr/lib64/
+EXR_LIB_DIR := $(HDSO)
 EXR_LIB := -lIlmImf -lIlmThread -lIex -lImath
 
 # The parent directory of the OpenEXR/ header directory (which contains half.h)
@@ -97,18 +97,18 @@ HALF_LIB_DIR := $(EXR_LIB_DIR)
 HALF_LIB := -lHalf
 
 # The parent directory of the tbb/ header directory
-TBB_INCL_DIR := /usr/include/
+TBB_INCL_DIR := $(HT)/include
 # The directory containing libtbb
-TBB_LIB_DIR := /usr/lib64/
+TBB_LIB_DIR := $(HDSO)
 TBB_LIB := -ltbb
 
 # A scalable, concurrent malloc replacement library
 # such as jemalloc (included in the Houdini HDK) or TBB malloc
 # (leave blank if unavailable)
-#CONCURRENT_MALLOC_LIB := -ljemalloc
-CONCURRENT_MALLOC_LIB := -ltbbmalloc_proxy -ltbbmalloc
+CONCURRENT_MALLOC_LIB := -ljemalloc
+#CONCURRENT_MALLOC_LIB := -ltbbmalloc_proxy -ltbbmalloc
 # The directory containing the malloc replacement library
-CONCURRENT_MALLOC_LIB_DIR := /usr/lib64/
+CONCURRENT_MALLOC_LIB_DIR := $(HDSO)
 
 # The parent directory of the cppunit/ header directory
 # (leave blank if CppUnit is unavailable)
@@ -119,9 +119,10 @@ CPPUNIT_LIB := -lcppunit
 
 # The directory containing glfw.h
 # (leave blank if GLFW is unavailable)
-GLFW_INCL_DIR := /usr/include/GL
+#GLFW_INCL_DIR := /usr/include/GL
+GLFW_INCL_DIR := /Volumes/sv-dev01/devRepo/johnc/3rdParty/github/redpawFX/openvdb_dev/glfw-2.7.9/BUILD/include
 # The directory containing libglfw
-GLFW_LIB_DIR := /usr/lib64/
+GLFW_LIB_DIR := /Volumes/sv-dev01/devRepo/johnc/3rdParty/github/redpawFX/openvdb_dev/glfw-2.7.9/BUILD/lib
 GLFW_LIB := -lglfw
 
 # The version of Python for which to build the OpenVDB module
