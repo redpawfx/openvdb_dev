@@ -6,3 +6,4 @@
 /vdb_view
 /openvdb_viewer
 /*.so*
+/*.kdev4

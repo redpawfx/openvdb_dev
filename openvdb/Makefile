@@ -78,8 +78,13 @@
 # $(NUMPY_INCL_DIR) below to your local distributions of those libraries.
 #
 
+## hardcoding  path to houdini here because  kdevelop doesn't like  some of the libs  within setpkg 
+HT := /Volumes/luma/_globalSoft/applications/houdini-13.0.237/toolkit
+HDSO := /Volumes/luma/_globalSoft/applications/houdini-13.0.237/dsolib
+
+
 # The directory into which to install libraries, executables and header files
-INSTALL_DIR := ./RELEASE/OpenVDB
+INSTALL_DIR := ./RELEASE/OpenVDB-2.1.0
 
 # The parent directory of the boost/ header directory
 BOOST_INCL_DIR := $(HT)/include
