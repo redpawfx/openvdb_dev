@@ -64,19 +64,24 @@ ifeq (,$(HFS))
 $(warning Warning: $$(HFS) is not set; did you source houdini_setup?)
 endif
 
+## hardcoding  path to houdini here because  kdevelop doesn't like  some of the libs  within setpkg 
+HT := /Volumes/luma/_globalSoft/applications/houdini-13.0.237/toolkit
+HDSO := /Volumes/luma/_globalSoft/applications/houdini-13.0.237/dsolib
+
+
 
 # The directory into which to install libraries and header files
 # (it's recommended that this match the INSTALL_DIR in the OpenVDB
 # library makefile)
-INSTALL_DIR := /tmp/OpenVDB
+INSTALL_DIR := /Volumes/sv-dev01/devRepo/johnc/3rdParty/github/redpawFX/openvdb_dev/openvdb/RELEASE
 
 # The directory into which to install Houdini SOPs
-HOUDINI_INSTALL_DIR := $(HIH)/dso
+HOUDINI_INSTALL_DIR := $(INSTALL_DIR)/houdini/dso
 
 # The parent directory of the openvdb/ header directory
-OPENVDB_INCL_DIR := $(INSTALL_DIR)/include
+OPENVDB_INCL_DIR := $(INSTALL_DIR)/OpenVDB-2.1.0/include
 # The directory containing libopenvdb
-OPENVDB_LIB_DIR := $(INSTALL_DIR)/lib
+OPENVDB_LIB_DIR := $(INSTALL_DIR)/OpenVDB-2.1.0/lib
 OPENVDB_LIB := -lopenvdb
 
 # The parent directory of the boost/ header directory

@@ -46,6 +46,7 @@
 #include <openvdb/tools/LevelSetUtil.h>
 #include <openvdb/tools/ParticlesToLevelSet.h>
 #include <CH/CH_Manager.h>
+#include <GEO/GEO_AttributeOwner.h>
 
 
 namespace hvdb = openvdb_houdini;

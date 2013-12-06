@@ -54,6 +54,7 @@
 #include <UT/UT_Quaternion.h>
 #include <UT/UT_ScopedPtr.h>
 #include <UT/UT_Version.h>
+#include <UT/UT_PtrArray.h>
 
 #include <boost/algorithm/string/join.hpp>
 #include <boost/random.hpp>

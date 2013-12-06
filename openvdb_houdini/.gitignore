@@ -1,0 +1,4 @@
+/houdini_deps
+/houdini_utils
+/*.so*
+/openvdb_houdini
