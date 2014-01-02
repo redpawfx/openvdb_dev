@@ -38,6 +38,7 @@
 #include <openvdb/tools/Composite.h>
 #include <openvdb/tools/GridTransformer.h> // for resampleToMatch()
 #include <openvdb/tools/LevelSetRebuild.h> // for levelSetRebuild()
+#include <openvdb/tools/Morphology.h> // for deactivate()
 #include <openvdb/util/NullInterrupter.h>
 #include <PRM/PRM_Parm.h>
 #include <UT/UT_Interrupt.h>
@@ -126,7 +127,7 @@ private:
 };
 
 
-//#define TIMES " \xd7 "
+//#define TIMES " \xd7 " // ISO-8859 multiplication symbol
 #define TIMES " * "
 const char* const SOP_OpenVDB_Combine::sOpMenuItems[] = {
     "copya",                "Copy A",
@@ -237,19 +238,34 @@ newSopOperator(OP_OperatorTable* table)
                 "resampling one grid to match the other's transform."));
     }
 
-    // Prune toggle
-    parms.add(hutil::ParmFactory(PRM_TOGGLE, "prune", "Prune Tolerance")
-        .setDefault(PRMoneDefaults)
-        .setTypeExtended(PRM_TYPE_TOGGLE_JOIN)
+    // Deactivate background value toggle
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "deactivate", "Deactivate Background Voxels")
+        .setDefault(PRMzeroDefaults)
+        .setTypeExtended(PRM_TYPE_TOGGLE_JOIN));
+
+    // Deactivation tolerance slider
+    parms.add(hutil::ParmFactory(PRM_FLT_J, "bgtolerance", "Deactivate Tolerance")
+        .setDefault(PRMzeroDefaults)
+        .setRange(PRM_RANGE_RESTRICTED, 0, PRM_RANGE_UI, 1)
         .setHelpText(
-            "Collapse regions of constant value in output grids.\n"
+            "Deactivate active output voxels whose values\n"
+            "equal the output grid's background value.\n"
             "Voxel values are considered equal if they differ\n"
-            "by less than the specified threshold."));
+            "by less than the specified tolerance."));
+
+    // Prune toggle
+    parms.add(hutil::ParmFactory(PRM_TOGGLE, "prune", "Prune")
+        .setDefault(PRMoneDefaults)
+        .setTypeExtended(PRM_TYPE_TOGGLE_JOIN));
 
     // Pruning tolerance slider
     parms.add(hutil::ParmFactory(PRM_FLT_J, "tolerance", "Prune Tolerance")
         .setDefault(PRMzeroDefaults)
-        .setRange(PRM_RANGE_RESTRICTED, 0, PRM_RANGE_UI, 1));
+        .setRange(PRM_RANGE_RESTRICTED, 0, PRM_RANGE_UI, 1)
+        .setHelpText(
+            "Collapse regions of constant value in output grids.\n"
+            "Voxel values are considered equal if they differ\n"
+            "by less than the specified tolerance."));
 
     // Flood fill toggle
     parms.add(hutil::ParmFactory(PRM_TOGGLE, "flood", "Signed-Flood-Fill Output")
@@ -329,6 +345,7 @@ SOP_OpenVDB_Combine::updateParmsFlags()
     bool changed = false;
 
     changed |= enableParm("resampleinterp", evalInt("resample", 0, 0) != 0);
+    changed |= enableParm("bgtolerance", evalInt("deactivate", 0, 0) != 0);
     changed |= enableParm("tolerance", evalInt("prune", 0, 0) != 0);
     changed |= enableParm("pairs", evalInt("flatten", 0, 0) == 0);
 
@@ -392,9 +409,15 @@ SOP_OpenVDB_Combine::cookMySop(OP_Context& context)
             UT_String aGridName = aIt.getPrimitiveName(/*default=*/"A");
             UT_String bGridName = bIt.getPrimitiveName(/*default=*/"B");
 
+            // Name the output grid after the A grid, except (see below) if the A grid is unused.
+            UT_String outGridName = aIt.getPrimitiveName();
+
             hvdb::GridPtr outGrid;
 
             while (true) {
+                // If the A grid is unused, name the output grid after the most recent B grid.
+                if (!needA) outGridName = bIt.getPrimitiveName();
+
                 outGrid = combineGrids(op, aGrid, bGrid, aGridName, bGridName, resample);
 
                 // When not flattening, quit after one pass.
@@ -415,9 +438,7 @@ SOP_OpenVDB_Combine::cookMySop(OP_Context& context)
             if (outGrid) {
                 // Add a new VDB primitive for the output grid to the output gdp.
                 GU_PrimVDB::buildFromGrid(*gdp, outGrid,
-                    /*copyAttrsFrom=*/needA ? aVdb : bVdb,
-                    /*copyGridNameFrom=*/needA ? aGridName.toStdString().c_str()
-                        : bGridName.toStdString().c_str());
+                    /*copyAttrsFrom=*/needA ? aVdb : bVdb, outGridName);
 
                 // Remove the A grid from the output gdp.
                 if (aVdb) gdp->destroyPrimitive(*aVdb, /*andPoints=*/true);
@@ -643,13 +664,15 @@ struct SOP_OpenVDB_Combine::CombineOp
             needB = self->needBGrid(op),
             needBoth = needA && needB,
             prune = self->evalInt("prune", 0, self->getTime()),
-            flood = self->evalInt("flood", 0, self->getTime());
+            flood = self->evalInt("flood", 0, self->getTime()),
+            deactivate = self->evalInt("deactivate", 0, self->getTime());
         const int
             samplingOrder = self->evalInt("resampleinterp", 0, self->getTime());
         const float
             aMult = self->evalFloat("mult_a", 0, self->getTime()),
             bMult = self->evalFloat("mult_b", 0, self->getTime()),
-            tolerance = self->evalFloat("tolerance", 0, self->getTime());
+            tolerance = self->evalFloat("tolerance", 0, self->getTime()),
+            deactivationTolerance = self->evalFloat("bgtolerance", 0, self->getTime());
 
         const GridT *aGrid = NULL, *bGrid = NULL;
         if (aBaseGrid) aGrid = UTvdbGridCast<GridT>(aBaseGrid);
@@ -835,6 +858,14 @@ struct SOP_OpenVDB_Combine::CombineOp
                 break;
         }
 
+        if (deactivate) {
+            // Mark active output tiles and voxels as inactive if their
+            // values match the output grid's background value.
+            // Do this first to facilitate pruning.
+            openvdb::tools::deactivate(*resultGrid, resultGrid->background(),
+                ValueT(ZERO + deactivationTolerance));
+        }
+
         // Note: flood fill and pruning currently work only for scalar grids.
         if (flood) resultGrid->signedFloodFill();
         if (prune) {
@@ -896,7 +927,8 @@ SOP_OpenVDB_Combine::combineGrids(Operation op,
     compOp.bGridName = bGridName;
     compOp.interrupt = hvdb::Interrupter();
 
-    int success = UTvdbProcessTypedGrid(UTvdbGetGridType(needA ? *aGrid : *bGrid), aGrid, compOp);
+    int success = UTvdbProcessTypedGridTopology(
+        UTvdbGetGridType(needA ? *aGrid : *bGrid), aGrid, compOp);
     if (!success || !compOp.outGrid) {
         std::ostringstream ostr;
         ostr << "grids " << aGridName << " and " << bGridName
