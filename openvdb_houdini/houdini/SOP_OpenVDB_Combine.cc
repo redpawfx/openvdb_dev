@@ -59,6 +59,7 @@ public:
         OP_ADD,               // A + B
         OP_SUBTRACT,          // A - B
         OP_MULTIPLY,          // A * B
+        OP_DIVIDE,            // A / B
         OP_MAXIMUM,           // max(A, B)
         OP_MINIMUM,           // min(A, B)
         OP_BLEND1,            // (1 - A) * B
@@ -140,6 +141,7 @@ const char* const SOP_OpenVDB_Combine::sOpMenuItems[] = {
     "add",                  "Add",
     "subtract",             "Subtract",
     "multiply",             "Multiply",
+    "divide",               "Divide",
     "maximum",              "Maximum",
     "minimum",              "Minimum",
     "compatimesb",          "(1 - A)" TIMES "B",
@@ -147,7 +149,7 @@ const char* const SOP_OpenVDB_Combine::sOpMenuItems[] = {
     "sdfunion",             "SDF Union",
     "sdfintersect",         "SDF Intersection",
     "sdfdifference",        "SDF Difference",
-    "replacewithactive",    "Replace A With Active B",
+    "replacewithactive",    "Replace A with Active B",
     "topounion",            "Activity Union",
     "topointersect",        "Activity Intersection",
     "topodifference",       "Activity Difference",
@@ -872,6 +874,12 @@ struct SOP_OpenVDB_Combine::CombineOp
                 MulAdd<GridT>(aMult).process(*aGrid, resultGrid);
                 MulAdd<GridT>(bMult).process(*bGrid, tempGrid);
                 openvdb::tools::compMul(*resultGrid, *tempGrid);
+                break;
+
+            case OP_DIVIDE:
+                MulAdd<GridT>(aMult).process(*aGrid, resultGrid);
+                MulAdd<GridT>(bMult).process(*bGrid, tempGrid);
+                openvdb::tools::compDiv(*resultGrid, *tempGrid);
                 break;
 
             case OP_MAXIMUM:
