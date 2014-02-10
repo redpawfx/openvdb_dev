@@ -60,12 +60,18 @@ IF (WIN32)
   TARGET_LINK_LIBRARIES ( openvdb
 	${Ilmbase_HALF_LIBRARY}
 	${ZLIB_LIBRARY}
+	${OPENGL_gl_LIBRARY}
+	${OPENGL_glu_LIBRARY}
+	${GLFW_glfw_LIBRARY}
 	)
 ELSE ()
   TARGET_LINK_LIBRARIES ( openvdb
 	${Ilmbase_HALF_LIBRARY}
 	${ZLIB_LIBRARY}
 	${Tbb_TBB_LIBRARY}
+	${OPENGL_gl_LIBRARY}
+	${OPENGL_glu_LIBRARY}
+	${GLFW_glfw_LIBRARY}
 	)
 ENDIF ()
 
@@ -138,6 +144,7 @@ INSTALL ( FILES
   Grid.h
   Metadata.h
   Platform.h
+  PlatformConfig.h
   Types.h
   openvdb.h
   version.h
