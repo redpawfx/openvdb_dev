@@ -41,7 +41,8 @@
 #include "Vec3.h"
 #include "Transform.h"
 #include <iostream> // for std::ostream
-
+#include <boost/type_traits/is_floating_point.hpp>
+#include <limits>// for std::numeric_limits<Type>::max()
 
 namespace openvdb {
 OPENVDB_USE_VERSION_NAMESPACE
@@ -52,13 +53,14 @@ template<typename RealT = double>
 class Ray
 {
 public:
+    BOOST_STATIC_ASSERT(boost::is_floating_point<RealT>::value);
     typedef RealT      RealType;
     typedef Vec3<Real> Vec3Type;
     typedef Vec3Type   Vec3T;
 
     Ray(const Vec3Type& eye = Vec3Type(0,0,0),
         const Vec3Type& direction = Vec3Type(1,0,0),
-        RealT t0 = 1e-3,
+        RealT t0 = math::Delta<RealT>::value(),
         RealT t1 = std::numeric_limits<RealT>::max())
         : mEye(eye), mDir(direction), mInvDir(1/mDir), mT0(t0), mT1(t1)
     {
@@ -76,12 +78,20 @@ public:
 
     inline void setMaxTime(RealT t1) { assert(t1>0); mT1 = t1; }
 
-    inline void setTimes(RealT t0, RealT t1) { assert(t0>0 && t1>0);mT0 = t0; mT1 = t1; }
+    inline void setTimes(RealT t0 = math::Delta<RealT>::value(),
+                         RealT t1 = std::numeric_limits<RealT>::max())
+    {
+        assert(t0>0 && t1>0);
+        mT0 = t0;
+        mT1 = t1;
+    }
 
     inline void scaleTimes(RealT scale) {  assert(scale>0); mT0 *= scale; mT1 *= scale; }
     
-    inline void reset(const Vec3Type& eye, const Vec3Type& direction,
-                      RealT t0 = 0, RealT t1 = std::numeric_limits<RealT>::max())
+    inline void reset(const Vec3Type& eye,
+                      const Vec3Type& direction,
+                      RealT t0 = math::Delta<RealT>::value(),
+                      RealT t1 = std::numeric_limits<RealT>::max())
     {
         this->setEye(eye);
         this->setDir(direction);
@@ -291,8 +301,8 @@ public:
 private:
     Vec3T mEye, mDir, mInvDir;
     RealT mT0, mT1;
-}; // end of Ray class  
-
+}; // end of Ray class
+    
 /// @brief Output streaming of the Ray class.
 /// @note Primarily intended for debugging.
 template<typename RealT>

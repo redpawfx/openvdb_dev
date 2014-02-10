@@ -35,6 +35,7 @@
 #include <boost/python/exception_translator.hpp>
 #include "openvdb/openvdb.h"
 #include "pyopenvdb.h"
+#include "pyGrid.h"
 #include "pyutil.h"
 
 namespace py = boost::python;
@@ -43,11 +44,9 @@ namespace py = boost::python;
 // Forward declarations
 void exportTransform();
 void exportMetadata();
-void exportGrid();
-namespace pyGrid {
-py::object getGridFromGridBase(openvdb::GridBase::Ptr);
-openvdb::GridBase::Ptr getGridBaseFromGrid(py::object);
-}
+void exportFloatGrid();
+void exportIntGrid();
+void exportVec3Grid();
 
 
 namespace _openvdbmodule {
@@ -518,7 +517,7 @@ struct GridClassDescr
             { "STAGGERED",  strdup(GridBase::gridClassToString(GRID_STAGGERED).c_str()) }
         };
         if (i >= 0 && i < sCount) return pyutil::CStringPair(&sStrings[i][0], &sStrings[i][1]);
-        return pyutil::CStringPair(NULL, NULL);
+        return pyutil::CStringPair(static_cast<char**>(NULL), static_cast<char**>(NULL));
     }
 };
 
@@ -561,7 +560,7 @@ struct VecTypeDescr
                 strdup(GridBase::vecTypeToString(openvdb::VEC_CONTRAVARIANT_ABSOLUTE).c_str()) }
         };
         if (i >= 0 && i < sCount) return std::make_pair(&sStrings[i][0], &sStrings[i][1]);
-        return pyutil::CStringPair(NULL, NULL);
+        return pyutil::CStringPair(static_cast<char**>(NULL), static_cast<char**>(NULL));
     }
 };
 
@@ -629,7 +628,9 @@ BOOST_PYTHON_MODULE(PY_OPENVDB_MODULE_NAME)
     // Export the python bindings.
     exportTransform();
     exportMetadata();
-    exportGrid();
+    exportFloatGrid();
+    exportIntGrid();
+    exportVec3Grid();
 
 
     py::def("read",

@@ -118,6 +118,13 @@ template<> struct Tolerance<float>    { static float value() { return 1e-8f; } }
 template<> struct Tolerance<double>   { static double value() { return 1e-15; } };
 //@}
 
+//@{
+/// Delta for small floating-point offsets
+template<typename T> struct Delta { static T value() { return zeroVal<T>(); } };
+template<> struct Delta<float>    { static float value() { return  1e-5f; } };
+template<> struct Delta<double>   { static double value() { return 1e-9; } };
+//@}
+
 
 // ==========> Random Values <==================
 
@@ -616,7 +623,12 @@ Min(const Type& a, const Type& b, const Type& c, const Type& d,
 
 
 ////////////////////////////////////////
+// ============> Exp <==================
 
+template<typename Type>
+inline Type Exp(const Type& x) { return std::exp(x); }
+    
+////////////////////////////////////////
 
 /// Return the sign of the given value as an integer (either -1, 0 or 1).
 template <typename Type>

@@ -94,6 +94,7 @@
 
 #include <openvdb/io/Stream.h>
 #include <openvdb/tools/Interpolation.h>
+#include <openvdb/tools/LevelSetMeasure.h>
 
 #include <boost/make_shared.hpp>
 #include <boost/shared_ptr.hpp>
@@ -250,21 +251,20 @@ geoStandardFrustumMapPtr(const GEO_PrimVDB &vdb)
 				    /*depth*/1.0, secondMap.copy()));
 }
 
-// Return a GEO_PrimVolumeXform which maps [-0.5,+0.5] Houdini voxel space
-// coordinates over the VDB's active voxel bbox into world space.
+// The returned space's fromVoxelSpace() method will convert 0-1
+// coordinates over the bbox extents to world space (and vice versa for
+// toVoxelSpace()).
 GEO_PrimVolumeXform
-GEO_PrimVDB::getSpaceTransform() const
+GEO_PrimVDB::getSpaceTransform(const UT_BoundingBoxD &bbox) const
 {
     using namespace openvdb;
     using namespace openvdb::math;
-    using openvdb::CoordBBox;
     using openvdb::Vec3d;
     using openvdb::Mat4d;
 
     MapBase::ConstPtr	base_map = getGrid().transform().baseMap();
-    const CoordBBox	coord_bbox = getGrid().evalActiveVoxelBoundingBox();
-    BBoxd		active_bbox(coord_bbox.getStart().asVec3d(),
-				    coord_bbox.getEnd().asVec3d());
+    BBoxd		active_bbox(UTvdbConvert(bbox.minvec()),
+				    UTvdbConvert(bbox.maxvec()));
     UT_Matrix4D		transform(1.0); // identity
     fpreal		new_taper(1.0); // no taper default
 
@@ -445,6 +445,15 @@ GEO_PrimVDB::getSpaceTransform() const
     result.myTaperY = new_taper;
 
     return result;
+}
+
+// Return a GEO_PrimVolumeXform which maps [-0.5,+0.5] Houdini voxel space
+// coordinates over the VDB's active voxel bbox into world space.
+GEO_PrimVolumeXform
+GEO_PrimVDB::getSpaceTransform() const
+{
+    const openvdb::CoordBBox bbox = getGrid().evalActiveVoxelBoundingBox();
+    return getSpaceTransform(UTvdbConvert(bbox));
 }
 
 bool
@@ -794,48 +803,57 @@ GEO_PrimVDB::computeNormal() const
     return UT_Vector3(0, 0, 0);
 }
 
+
+
+template <typename GridType>
+static void
+geo_calcVolume(const GridType &grid, fpreal &volume)
+{
+    if (grid.getGridClass() == openvdb::GRID_LEVEL_SET) {
+        volume = openvdb::tools::levelSetVolume(grid);
+    } else {//simply account for the total number of active voxels
+        const openvdb::Vec3d size = grid.voxelSize();
+        volume = size[0] * size[1] * size[2] * grid.activeVoxelCount();
+    }
+}
+
 fpreal
 GEO_PrimVDB::calcVolume(const UT_Vector3 &) const
 {
-    const openvdb::GridBase &grid = getGrid();
-    const openvdb::Vec3d size = grid.voxelSize();
-    return size[0] * size[1] * size[2] * grid.activeVoxelCount();
+    fpreal volume = 0;
+    UTvdbCallAllType(getStorageType(), geo_calcVolume, getGrid(), volume);
+    return volume;
 }
 
 template <typename GridType>
 static void
 geo_calcArea(const GridType &grid, fpreal &area)
 {
-
-    // NOTE: we assume rectangular prism voxels
-    openvdb::Vec3d voxel_size = grid.voxelSize();
-    area = 0;
-    for (typename GridType::TreeType::LeafCIter
-	 leaf = grid.tree().cbeginLeaf(); leaf; ++leaf)
-    {
-	// Visit all the active voxels in this leaf node.
-	for (typename GridType::TreeType::LeafNodeType::ValueOnCIter
-	     iter = leaf->cbeginValueOn(); iter; ++iter)
-	{
-	    // Iterate through all the neighboring voxels
-	    using openvdb::Coord;
-	    const Coord normals[] = {
-		Coord(0,0,-1), Coord(0,0,1), Coord(-1,0,0),
-		Coord(1,0,0), Coord(0,-1,0), Coord(0,1,0)
-	    };
-	    const fpreal areas[] = {
-		voxel_size.x() * voxel_size.y(),
-		voxel_size.x() * voxel_size.y(),
-		voxel_size.y() * voxel_size.z(),
-		voxel_size.y() * voxel_size.z(),
-		voxel_size.z() * voxel_size.x(),
-		voxel_size.z() * voxel_size.x(),
-	    };
-
-	    for (int i=0; i<6; i++)
-		if (!grid.tree().isValueOn(iter.getCoord() + normals[i]))
-		    area += areas[i];
-	}
+    if (grid.getGridClass() == openvdb::GRID_LEVEL_SET) {
+        area = openvdb::tools::levelSetArea(grid);
+    } else {
+        typedef typename GridType::TreeType::LeafCIter LeafIter;
+        typedef typename GridType::TreeType::LeafNodeType::ValueOnCIter VoxelIter;
+        using openvdb::Coord;
+        const Coord normals[] = {Coord(0,0,-1), Coord(0,0,1), Coord(-1,0,0),
+                                 Coord(1,0,0), Coord(0,-1,0), Coord(0,1,0)};
+        // NOTE: we assume rectangular prism voxels
+        openvdb::Vec3d voxel_size = grid.voxelSize();
+        const fpreal areas[] = {voxel_size.x() * voxel_size.y(),
+                                voxel_size.x() * voxel_size.y(),
+                                voxel_size.y() * voxel_size.z(),
+                                voxel_size.y() * voxel_size.z(),
+                                voxel_size.z() * voxel_size.x(),
+                                voxel_size.z() * voxel_size.x()};
+        area = 0;
+        for (LeafIter leaf = grid.tree().cbeginLeaf(); leaf; ++leaf) {
+            // Visit all the active voxels in this leaf node.
+            for (VoxelIter iter = leaf->cbeginValueOn(); iter; ++iter) {
+                // Iterate through all the neighboring voxels
+                for (int i=0; i<6; i++)
+                    if (!grid.tree().isValueOn(iter.getCoord() + normals[i])) area += areas[i];
+            }
+        }
     }
 }
 
@@ -2476,16 +2494,16 @@ GEO_PrimVDB::saveVDB(UT_JSONWriter &w) const
 	openvdb::GridCPtrVec grids;
 	grids.push_back(getConstGridPtr());
 
-	openvdb::io::Stream			vos;
+	UT_JSONWriter::TiledStream os(w);
+
+	openvdb::io::Stream			vos(os);
 	openvdb::MetaMap			meta;
 
 	// Always turn off compression since it is too slow for the size gain
 	vos.setCompressionEnabled(false);
 
-	UT_JSONWriter::TiledStream os(w);
-
 	// Visual C++ requires a default meta object declared on the stack
-	vos.write(os, grids, meta);
+	vos.write(grids, meta);
     }
     catch (std::exception &e)
     {
@@ -2808,14 +2826,14 @@ GEO_PrimVDB::GridAccessor::updateGridTranslates(const GEO_PrimVDB &prim) const
 {
     using namespace	openvdb::math;
     const GA_Detail &	geo = prim.getDetail();
-    GA_Offset		vtxoff = prim.vertexPoint(0);
 
     // It is possible our vertex offset is invalid, such as us
     // being a stashed primitive.
-    if (!GAisValid(vtxoff))
+    if (!GAisValid(prim.getVertexOffset(0)))
 	return;
 
-    Vec3d		newpos = UTvdbConvert(geo.getPos3(vtxoff));
+    GA_Offset		ptoff = prim.vertexPoint(0);
+    Vec3d		newpos = UTvdbConvert(geo.getPos3(ptoff));
     Vec3d		oldpos = vdbTranslation(myGrid->transform());
     MapBase::ConstPtr	map = myGrid->transform().baseMap();
 

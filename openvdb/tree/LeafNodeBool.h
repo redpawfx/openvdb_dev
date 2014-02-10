@@ -641,11 +641,11 @@ protected:
     };
 
 public:
-    typedef ValueIter<MaskOnIter, LeafNode, bool>                 ValueOnIter;
+    typedef ValueIter<MaskOnIter, LeafNode, const bool>           ValueOnIter;
     typedef ValueIter<MaskOnIter, const LeafNode, const bool>     ValueOnCIter;
-    typedef ValueIter<MaskOffIter, LeafNode, bool>                ValueOffIter;
+    typedef ValueIter<MaskOffIter, LeafNode, const bool>          ValueOffIter;
     typedef ValueIter<MaskOffIter, const LeafNode, const bool>    ValueOffCIter;
-    typedef ValueIter<MaskDenseIter, LeafNode, bool>              ValueAllIter;
+    typedef ValueIter<MaskDenseIter, LeafNode, const bool>        ValueAllIter;
     typedef ValueIter<MaskDenseIter, const LeafNode, const bool>  ValueAllCIter;
     typedef ChildIter<MaskOnIter, LeafNode>                       ChildOnIter;
     typedef ChildIter<MaskOnIter, const LeafNode>                 ChildOnCIter;
@@ -914,8 +914,10 @@ template<Index Log2Dim>
 inline Index
 LeafNode<bool, Log2Dim>::coordToOffset(const Coord& xyz)
 {
-    assert ((xyz[0] & DIM-1u) < DIM && (xyz[1] & DIM-1u) < DIM && (xyz[2] & DIM-1u) < DIM);
-    return ((xyz[0] & DIM-1u) << 2*Log2Dim) + ((xyz[1] & DIM-1u) << Log2Dim) + (xyz[2] & DIM-1u);
+    assert ((xyz[0] & (DIM-1u)) < DIM && (xyz[1] & (DIM-1u)) < DIM && (xyz[2] & (DIM-1u)) < DIM);
+    return ((xyz[0] & (DIM-1u)) << 2*Log2Dim)
+         + ((xyz[1] & (DIM-1u)) << Log2Dim)
+         +  (xyz[2] & (DIM-1u));
 }
 
 
@@ -1217,6 +1219,9 @@ LeafNode<bool, Log2Dim>::resetBackground(bool oldBackground, bool newBackground)
 }
 
 
+////////////////////////////////////////
+
+
 template<Index Log2Dim>
 template<MergePolicy Policy>
 inline void
@@ -1250,6 +1255,9 @@ LeafNode<bool, Log2Dim>::merge(bool tileValue, bool tileActive)
 }
 
 
+////////////////////////////////////////
+
+
 template<Index Log2Dim>
 template<typename OtherType>
 inline void
@@ -1257,6 +1265,7 @@ LeafNode<bool, Log2Dim>::topologyUnion(const LeafNode<OtherType, Log2Dim>& other
 {
     mValueMask |= other.getValueMask();
 }
+
 
 template<Index Log2Dim>
 template<typename OtherType>
@@ -1267,6 +1276,7 @@ LeafNode<bool, Log2Dim>::topologyIntersection(const LeafNode<OtherType, Log2Dim>
     mValueMask &= other.getValueMask();
 }
 
+
 template<Index Log2Dim>
 template<typename OtherType>
 inline void
@@ -1276,16 +1286,20 @@ LeafNode<bool, Log2Dim>::topologyDifference(const LeafNode<OtherType, Log2Dim>& 
     mValueMask &= !other.getValueMask();
 }
 
+
+////////////////////////////////////////
+
+
 template<Index Log2Dim>
 inline void
 LeafNode<bool, Log2Dim>::fill(const CoordBBox& bbox, bool value, bool active)
 {
     for (Int32 x = bbox.min().x(); x <= bbox.max().x(); ++x) {
-        const Index offsetX = (x&DIM-1u)<<2*Log2Dim;
+        const Index offsetX = (x & (DIM-1u))<<2*Log2Dim;
         for (Int32 y = bbox.min().y(); y <= bbox.max().y(); ++y) {
-            const Index offsetXY = offsetX + ((y&DIM-1u)<<  Log2Dim);
+            const Index offsetXY = offsetX + ((y & (DIM-1u))<<  Log2Dim);
             for (Int32 z = bbox.min().z(); z <= bbox.max().z(); ++z) {
-                const Index offset = offsetXY + (z&DIM-1u);
+                const Index offset = offsetXY + (z & (DIM-1u));
                 mValueMask.set(offset, active);
                 mBuffer.mData.set(offset, value);
             }
@@ -1319,18 +1333,18 @@ LeafNode<bool, Log2Dim>::copyToDense(const CoordBBox& bbox, DenseT& dense) const
 {
     typedef typename DenseT::ValueType DenseValueType;
 
-    const size_t xStride = dense.xStride(), yStride = dense.yStride();// zStride=1
+    const size_t xStride = dense.xStride(), yStride = dense.yStride(), zStride = dense.zStride();
     const Coord& min = dense.bbox().min();
-    DenseValueType* t0 = dense.data() + bbox.min()[2]-min[2];//target array
-    const Int32 n0 = bbox.min()[2]&DIM-1u;
-    for (Int32 x = bbox.min()[0], ex=bbox.max()[0]+1; x<ex; ++x) {
-        DenseValueType* t1 = t0 + xStride*(x-min[0]);
-        const Int32 n1 = n0 + ((x&DIM-1u)<<2*LOG2DIM);
-        for (Int32 y = bbox.min()[1], ey=bbox.max()[1]+1; y<ey; ++y) {
-            DenseValueType* t2 = t1 + yStride*(y-min[1]);
-            Int32 n2 = n1 + ((y&DIM-1u)<<LOG2DIM) ;
-            for (Int32 z = bbox.min()[2], ez=bbox.max()[2]+1; z<ez ; ++z) {
-                *t2++ = DenseValueType(mBuffer.mData.isOn(n2++));
+    DenseValueType* t0 = dense.data() + zStride * (bbox.min()[2] - min[2]); // target array
+    const Int32 n0 = bbox.min()[2] & (DIM-1u);
+    for (Int32 x = bbox.min()[0], ex = bbox.max()[0] + 1; x < ex; ++x) {
+        DenseValueType* t1 = t0 + xStride * (x - min[0]);
+        const Int32 n1 = n0 + ((x & (DIM-1u)) << 2*LOG2DIM);
+        for (Int32 y = bbox.min()[1], ey = bbox.max()[1] + 1; y < ey; ++y) {
+            DenseValueType* t2 = t1 + yStride * (y - min[1]);
+            Int32 n2 = n1 + ((y & (DIM-1u)) << LOG2DIM);
+            for (Int32 z = bbox.min()[2], ez = bbox.max()[2] + 1; z < ez; ++z, t2 += zStride) {
+                *t2 = DenseValueType(mBuffer.mData.isOn(n2++));
             }
         }
     }
@@ -1345,17 +1359,17 @@ LeafNode<bool, Log2Dim>::copyFromDense(const CoordBBox& bbox, const DenseT& dens
 {
     typedef typename DenseT::ValueType DenseValueType;
 
-    const size_t xStride = dense.xStride(), yStride = dense.yStride();// zStride=1
+    const size_t xStride = dense.xStride(), yStride = dense.yStride(), zStride = dense.zStride();
     const Coord& min = dense.bbox().min();
-    const DenseValueType* s0 = dense.data() + bbox.min()[2]-min[2];//source
-    const Int32 n0 = bbox.min()[2]&DIM-1u;
-    for (Int32 x = bbox.min()[0], ex=bbox.max()[0]+1; x<ex; ++x) {
-        const DenseValueType* s1 = s0 + xStride*(x-min[0]);
-        const Int32 n1 = n0 + ((x&DIM-1u)<<2*LOG2DIM);
-        for (Int32 y = bbox.min()[1], ey=bbox.max()[1]+1; y<ey; ++y) {
-            const DenseValueType* s2 = s1 + yStride*(y-min[1]);
-            Int32 n2 = n1 + ((y&DIM-1u)<<LOG2DIM);
-            for (Int32 z = bbox.min()[2], ez=bbox.max()[2]+1; z<ez ; ++z, ++n2, ++s2) {
+    const DenseValueType* s0 = dense.data() + zStride * (bbox.min()[2] - min[2]); // source
+    const Int32 n0 = bbox.min()[2] & (DIM-1u);
+    for (Int32 x = bbox.min()[0], ex = bbox.max()[0] + 1; x < ex; ++x) {
+        const DenseValueType* s1 = s0 + xStride * (x - min[0]);
+        const Int32 n1 = n0 + ((x & (DIM-1u)) << 2*LOG2DIM);
+        for (Int32 y = bbox.min()[1], ey = bbox.max()[1] + 1; y < ey; ++y) {
+            const DenseValueType* s2 = s1 + yStride * (y - min[1]);
+            Int32 n2 = n1 + ((y & (DIM-1u)) << LOG2DIM);
+            for (Int32 z = bbox.min()[2], ez = bbox.max()[2]+1; z < ez; ++z, ++n2, s2 += zStride) {
                 // Note: if tolerance is true (i.e., 1), then all boolean values compare equal.
                 if (tolerance || background == bool(*s2)) {
                     mValueMask.setOff(n2);
@@ -1483,9 +1497,9 @@ LeafNode<bool, Log2Dim>::visitActiveBBox(BBoxOp& op) const
     if (op.template descent<LEVEL>()) {
         for (ValueOnCIter i=this->cbeginValueOn(); i; ++i) {
 #ifdef _MSC_VER
-            op.operator()<LEVEL>(CoordBBox(i.getCoord(),1));
+            op.operator()<LEVEL>(CoordBBox::createCube(i.getCoord(), 1));
 #else
-            op.template operator()<LEVEL>(CoordBBox(i.getCoord(),1));
+            op.template operator()<LEVEL>(CoordBBox::createCube(i.getCoord(), 1));
 #endif
         }
     } else {
