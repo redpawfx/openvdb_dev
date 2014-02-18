@@ -84,7 +84,7 @@ HDSO := /Volumes/luma/_globalSoft/applications/houdini-13.0.237/dsolib
 
 
 # The directory into which to install libraries, executables and header files
-INSTALL_DIR := ./RELEASE/OpenVDB-2.1.0
+INSTALL_DIR := ../RELEASE/OpenVDB-2.2.0
 
 # The parent directory of the boost/ header directory
 BOOST_INCL_DIR := $(HT)/include

@@ -56,15 +56,15 @@ endif
 # The directory into which to install libraries and header files
 # (it is recommended that this match the INSTALL_DIR in the OpenVDB
 # library makefile)
-INSTALL_DIR := /tmp/OpenVDB
+INSTALL_DIR := /Volumes/sv-dev01/devRepo/johnc/3rdParty/github/redpawFX/openvdb_dev/RELEASE
 
 # The directory into which to install Maya plugins, scripts, etc.
 MAYA_INSTALL_DIR := $(INSTALL_DIR)/maya
 
 # The parent directory of the openvdb/ header directory
-OPENVDB_INCL_DIR := $(INSTALL_DIR)/include
+OPENVDB_INCL_DIR := $(INSTALL_DIR)/OpenVDB-2.2.0/include
 # The directory containing libopenvdb
-OPENVDB_LIB_DIR := $(INSTALL_DIR)/lib
+OPENVDB_LIB_DIR := $(INSTALL_DIR)/OpenVDB-2.2.0/lib
 OPENVDB_LIB := -lopenvdb
 
 # The parent directory of the boost/ header directory
