@@ -32,13 +32,7 @@
 
 #include <cmath>
 
-#if defined(__APPLE__) || defined(MACOSX)
-#include <OpenGL/gl.h>
-#include <OpenGL/glu.h>
-#else
-#include <GL/gl.h>
-#include <GL/glu.h>
-#endif
+#include "OpenGLHeaders.h"
 
 #include <GL/glfw.h>
 
