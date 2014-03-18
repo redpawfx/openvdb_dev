@@ -245,6 +245,7 @@ INCLUDE_NAMES := \
     io/Stream.h \
     math/BBox.h \
     math/Coord.h \
+    math/DDA.h \
     math/FiniteDifference.h \
     math/Hermite.h \
     math/LegacyFrustum.h \
@@ -274,6 +275,7 @@ INCLUDE_NAMES := \
     PlatformConfig.h \
     tools/Composite.h \
     tools/Dense.h \
+    tools/DenseSparseTools.h \
     tools/Filter.h \
     tools/GridOperators.h \
     tools/GridTransformer.h \
@@ -353,6 +355,7 @@ UNITTEST_SRC_NAMES := \
     unittest/TestCpt.cc \
     unittest/TestCurl.cc \
     unittest/TestDense.cc \
+    unittest/TestDenseSparseTools.cc \
     unittest/TestDivergence.cc \
     unittest/TestDoubleMetadata.cc \
     unittest/TestExceptions.cc \

@@ -3,9 +3,63 @@
 @page changes Release Notes
 
 
+@htmlonly <a name="v2_3_0_changes"></a>@endhtmlonly
+@par
+<B>Version 2.3.0</B> - <I>In development</I>
+- Added @vdblink::tools::extractSparseTree() extractSparseTree@endlink,
+  which selectively extracts and transforms data from a dense grid to
+  produce a sparse tree, and @vdblink::tools::extractSparseTreeWithMask()
+  extractSparseTreeWithMask@endlink, which copies data from the index-space
+  intersection of a sparse tree and a dense input grid.
+- Added copy constructors to the
+  @vdblink::Grid::Grid(const Grid<OtherTreeType>&) Grid@endlink,
+  @vdblink::tree::Tree::Tree(const Tree<OtherRootType>&) Tree@endlink,
+  @vdblink::tree::RootNode::RootNode(const RootNode<OtherChildType>&)
+  RootNode@endlink,
+  @vdblink::tree::InternalNode::InternalNode(const InternalNode<OtherChildNodeType, Log2Dim>&)
+  InternalNode@endlink and
+  @vdblink::tree::LeafNode::LeafNode(const LeafNode<OtherValueType, Log2Dim>&) LeafNode@endlink
+  classes, and an assignment operator overload to
+  @vdblink::tree::RootNode::operator=(const RootNode<OtherChildType>&)
+  RootNode@endlink, that allow the source and destination to have different
+  value types.
+- Modified @vdblink::tree::Tree::combine2() Tree::combine2@endlink to permit
+  combination of trees with different value types.
+- Added @vdblink::CanConvertType CanConvertType@endlink and
+  @vdblink::tree::RootNode::SameConfiguration
+  RootNode::SameConfiguration@endlink metafunctions, which perform compile-time
+  tests for value type and tree type compatibility, and a
+  @vdblink::tree::RootNode::hasCompatibleValueType()
+  RootNode::hasCompatibleValueType@endlink method, which does runtime checking.
+
+@par
+API changes:
+- Collected the digital differential analyzer code from math/Ray.h
+  and tools/RayIntersector.h into a new header file, math/DDA.h.
+- Rewrote @vdblink::math::VolumeHDDA VolumeHDDA@endlink and made several
+  changes to its API.  (@vdblink::math::VolumeHDDA VolumeHDDA@endlink
+  is used internally by @vdblink::tools::VolumeRayIntersector 
+  VolumeRayIntersector@endlink, whose API is unchanged.)
+- @vdblink::tree::Tree::combine2() Tree::combine2@endlink,
+  @vdblink::tree::RootNode::combine2() RootNode::combine2@endlink,
+  @vdblink::tree::InternalNode::combine2() InternalNode::combine2@endlink,
+  @vdblink::tree::LeafNode::combine2() LeafNode::combine2@endlink
+  and @vdblink::CombineArgs CombineArgs@endlink all now require an additional
+  template argument, which determines the type of the other tree.
+- Assignment operators for
+  @vdblink::tree::LeafManager::LeafRange::Iterator::operator=()
+  LeafManager::LeafRange::Iterator@endlink,
+  @vdblink::util::BaseMaskIterator::operator=() BaseMaskIterator@endlink,
+  @vdblink::util::NodeMask::operator=() NodeMask@endlink and
+  @vdblink::util::RootNodeMask::operator=() RootNodeMask@endlink
+  now return references to the respective objects.
+- Removed a number of methods that were deprecated in version&nbsp;2.0.0
+  or earlier.
+
+
 @htmlonly <a name="v2_2_0_changes"></a>@endhtmlonly
 @par
-<B>Version 2.2.0</B> - <I>In development</I>
+<B>Version 2.2.0</B> - <I>February 20, 2014</I>
 - Added a simple, multithreaded
   @vdblink::tools::VolumeRender volume renderer@endlink,
   and added volume rendering support to the @c vdb_render
@@ -17,12 +71,14 @@
   @vdblink::tools::LevelSetRayIntersector LevelSetRayIntersector@endlink 
   to return the time of intersection along a world or index ray and to
   return the level set isovalue.
-- Added bounding box support to the
-  @vdblink::tools::VolumeRayIntersector VolumeRayIntersector@endlink.
+- Improved the performance of the
+  @vdblink::tools::VolumeRayIntersector VolumeRayIntersector@endlink
+  and added support for voxel dilation to account for interpolation kernels.
 - Added a @ref sInterpolation "section" to the Cookbook on interpolation
   using @vdblink::tools::BoxSampler BoxSampler@endlink,
   @vdblink::tools::GridSampler GridSampler@endlink,
   @vdblink::tools::DualGridSampler DualGridSampler@endlink, et al.
+- Added a @ref secGrid "section" to the Overview on grids and grid metadata.
 - Modified @vdblink::tools::DualGridSampler DualGridSampler@endlink so 
   it is more consistent with @vdblink::tools::GridSampler GridSampler@endlink.
 - The @vdblink::tools::cpt() cpt@endlink, @vdblink::tools::curl() curl@endlink,
@@ -33,8 +89,9 @@
   (covariant, contravariant, etc.).
 - Added a @vdblink::tools::transformVectors() transformVectors@endlink tool,
   which applies an affine transformation to the voxel values of a
-  vector-valued grid, in accordance with the grid&rsquo;s
-  @vdblink::VecType vector type@endlink.
+  vector-valued grid in accordance with the grid&rsquo;s
+  @vdblink::VecType vector type@endlink and
+  @vdblink::Grid::isInWorldSpace() world space/local space@endlink setting.
 - Added a @vdblink::tools::compDiv() compDiv@endlink tool, which combines
   grids by dividing the values of corresponding voxels.
 - Fixed a bug in the mean curvature computation that could produce NaNs
@@ -56,15 +113,27 @@
 - Fixed a file I/O bug whereby some <TT>.vdb</TT> files could not be read
   correctly if they contained grids with more than two distinct inactive
   values.
+- Fixed an off-by-one bug in the numbering of unnamed grids in <TT>.vdb</TT>
+  files.  The first unnamed grid in a file is now retrieved using the name
+  &ldquo;<TT>[0]</TT>&rdquo;, instead of &ldquo;<TT>[1]</TT>&rdquo;.
 - Fixed a build issue reported by Clang&nbsp;3.2 in tools/GridOperators.h.
-- Improved convergence in @vdblink::tools::VolumeRender VolumeRender@endlink. 
-  <I>[Contributed by Jerry Tessendorf]</I>
+- Fixed a memory leak in @vdblink::tools::Film Film@endlink.
+- Added library and file format version number constants to the Python module.
+- Improved convergence in the
+  @vdblink::tools::VolumeRender volume renderer@endlink. 
+  <I>[Contributed by Jerry Tessendorf and Mark Matthews]</I>
 - Made various changes for compatibility with Houdini&nbsp;13 and with
   C++11 compilers.
   <I>[Contributed&nbsp;by&nbsp;SESI]</I>
 
 @par
 API changes:
+- @vdblink::tools::VolumeRayIntersector::march()
+  VolumeRayIntersector::march@endlink no longer returns an @c int
+  to distinguish tile vs. voxel hits.  Instead, it now returns @c false
+  if no intersection is detected and @c true otherwise.  Also, @e t0 and
+  @e t1 might now correspond to the first and last hits of multiple adjacent
+  leaf nodes and/or active tiles. 
 - @vdblink::tools::DualGridSampler DualGridSampler@endlink is no longer 
   templated on the target grid type, and the value accessor is now passed 
   as an argument.
@@ -88,10 +157,14 @@ Houdini:
   either world or voxel units.
 - Added a toggle to the Transform and Resample SOPs to apply the transform
   to the voxel values of vector-valued grids, in accordance with those
-  grids&rsquo; @vdblink::VecType vector types@endlink.
+  grids&rsquo; @vdblink::VecType vector types@endlink and
+  @vdblink::Grid::isInWorldSpace() world space/local space@endlink settings.
 - Added a Vector Type menu to the Vector Merge SOP.
 - Removed masking options from the Renormalize SOP (since masking is
   not supported yet).
+- Reimplemented the Vector Merge SOP for better performance and
+  interruptibility and to fix a bug in the handling of tile values.
+
 
 @htmlonly <a name="v2_1_0_changes"></a>@endhtmlonly
 @par
@@ -231,7 +304,7 @@ API changes:
   new methods, so do not call these methods from Houdini&nbsp;12.5.
 - Reimplemented @vdblink::math::RandomInt math::RandomInt@endlink using
   Boost.Random instead of @c rand() (which is not thread-safe), and deprecated
-  @vdblink::math::randUniform math::randUniform@endlink and added
+  @c math::randUniform() and added
   @vdblink::math::Random01 math::Random01@endlink to replace it. 
 - Modified @vdblink::tools::copyFromDense() tools::copyFromDense@endlink
   and @vdblink::tools::copyToDense() tools::copyToDense@endlink to allow
