@@ -72,6 +72,7 @@ ELSE ()
 	${OPENGL_gl_LIBRARY}
 	${OPENGL_glu_LIBRARY}
 	${GLFW_glfw_LIBRARY}
+	Xrandr
 	)
 ENDIF ()
 
