@@ -42,11 +42,11 @@
 /// vdb::vX_Y_Z::Vec3i, vdb::vX_Y_Z::io::File, vdb::vX_Y_Z::tree::Tree, etc.,
 /// where X, Y and Z are OPENVDB_LIBRARY_MAJOR_VERSION, OPENVDB_LIBRARY_MINOR_VERSION
 /// and OPENVDB_LIBRARY_PATCH_VERSION, respectively (defined below).
-#define OPENVDB_VERSION_NAME v2_2_0
+#define OPENVDB_VERSION_NAME v2_3_0
 
 // Library major, minor and patch version numbers
 #define OPENVDB_LIBRARY_MAJOR_VERSION_NUMBER 2
-#define OPENVDB_LIBRARY_MINOR_VERSION_NUMBER 2
+#define OPENVDB_LIBRARY_MINOR_VERSION_NUMBER 3
 #define OPENVDB_LIBRARY_PATCH_VERSION_NUMBER 0
 
 /// Library version number as a packed integer ("%02x%02x%04x", major, minor, patch)
@@ -89,7 +89,7 @@ const uint32_t OPENVDB_LIBRARY_VERSION = OPENVDB_LIBRARY_VERSION_NUMBER;
 /// @brief The current version number of the VDB file format
 /// @details  This can be used to enable various backwards compatability switches
 /// or to reject files that cannot be read.
-const uint32_t OPENVDB_FILE_VERSION = 223;
+const uint32_t OPENVDB_FILE_VERSION = 222;
 
 /// Notable file format version numbers
 enum {
@@ -103,8 +103,7 @@ enum {
     OPENVDB_FILE_VERSION_NEW_TRANSFORM = 219,
     OPENVDB_FILE_VERSION_SELECTIVE_COMPRESSION = 220,
     OPENVDB_FILE_VERSION_FLOAT_FRUSTUM_BBOX = 221,
-    OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION = 222,
-    OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION_FIX = 223
+    OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION = 222
 };
 
 

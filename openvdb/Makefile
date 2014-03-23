@@ -117,6 +117,13 @@ CPPUNIT_INCL_DIR := /rel/map/generic-2013.22/sys_include
 CPPUNIT_LIB_DIR := /rel/depot/third_party_build/cppunit/1.10.2-7/opt-ws5-x86_64-gccWS5_64/lib
 CPPUNIT_LIB := -lcppunit
 
+# The parent directory of the log4cplus/ header directory
+# (leave blank if log4cplus is unavailable)
+LOG4CPLUS_INCL_DIR := /rel/folio/log4cplus/log4cplus-1.0.3-latest/sys_include
+# The directory containing liblog4cplus
+LOG4CPLUS_LIB_DIR := /rel/folio/log4cplus/log4cplus-1.0.3-latest/library
+LOG4CPLUS_LIB := -llog4cplus
+
 # The directory containing glfw.h
 # (leave blank if GLFW is unavailable)
 GLFW_INCL_DIR := /rel/third_party/glfw/current/include
@@ -198,6 +205,11 @@ ifeq (3,$(words $(strip $(GLFW_LIB_DIR) $(GLFW_INCL_DIR) $(GLFW_LIB))))
     has_glfw := yes
 endif
 
+has_log4cplus := no
+ifeq (3,$(words $(strip $(LOG4CPLUS_LIB_DIR) $(LOG4CPLUS_INCL_DIR) $(LOG4CPLUS_LIB))))
+    has_log4cplus := yes
+endif
+
 has_python := no
 ifeq (7,$(words $(strip $(PYTHON_VERSION) $(PYTHON_LIB_DIR) $(PYTHON_INCL_DIR) \
     $(PYCONFIG_INCL_DIR) $(PYTHON_LIB) $(BOOST_PYTHON_LIB_DIR) $(BOOST_PYTHON_LIB))))
@@ -205,8 +217,14 @@ ifeq (7,$(words $(strip $(PYTHON_VERSION) $(PYTHON_LIB_DIR) $(PYTHON_INCL_DIR) \
 endif
 
 INCLDIRS := -I . -I .. -I $(BOOST_INCL_DIR) -I $(HALF_INCL_DIR) -I $(TBB_INCL_DIR)
+ifeq (yes,$(has_log4cplus))
+	INCLDIRS += -I $(LOG4CPLUS_INCL_DIR)
+endif
 
 CXXFLAGS += -pthread $(OPTIMIZE) $(INCLDIRS)
+ifeq (yes,$(has_log4cplus))
+	CXXFLAGS += -DOPENVDB_USE_LOG4CPLUS
+endif
 
 LIBS := \
     -ldl -lm -lz \
@@ -218,6 +236,10 @@ LIBS_RPATH := \
     -Wl,-rpath,$(HALF_LIB_DIR) -L$(HALF_LIB_DIR) $(HALF_LIB) \
     -Wl,-rpath,$(TBB_LIB_DIR) -L$(TBB_LIB_DIR) $(TBB_LIB) \
 #
+ifeq (yes,$(has_log4cplus))
+    LIBS += -L$(LOG4CPLUS_LIB_DIR) $(LOG4CPLUS_LIB)
+    LIBS_RPATH += -Wl,-rpath,$(LOG4CPLUS_LIB_DIR) -L$(LOG4CPLUS_LIB_DIR) $(LOG4CPLUS_LIB)
+endif
 ifneq (,$(strip $(CONCURRENT_MALLOC_LIB)))
 ifneq (,$(strip $(CONCURRENT_MALLOC_LIB_DIR)))
     LIBS_RPATH += -Wl,-rpath,$(CONCURRENT_MALLOC_LIB_DIR) -L$(CONCURRENT_MALLOC_LIB_DIR)
@@ -239,6 +261,7 @@ INCLUDE_NAMES := \
     io/Stream.h \
     math/BBox.h \
     math/Coord.h \
+    math/DDA.h \
     math/FiniteDifference.h \
     math/Hermite.h \
     math/LegacyFrustum.h \
@@ -268,6 +291,7 @@ INCLUDE_NAMES := \
     PlatformConfig.h \
     tools/Composite.h \
     tools/Dense.h \
+    tools/DenseSparseTools.h \
     tools/Filter.h \
     tools/GridOperators.h \
     tools/GridTransformer.h \
@@ -347,6 +371,7 @@ UNITTEST_SRC_NAMES := \
     unittest/TestCpt.cc \
     unittest/TestCurl.cc \
     unittest/TestDense.cc \
+    unittest/TestDenseSparseTools.cc \
     unittest/TestDivergence.cc \
     unittest/TestDoubleMetadata.cc \
     unittest/TestExceptions.cc \
