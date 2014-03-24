@@ -8,7 +8,7 @@ MESSAGE ( "BEFORE CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}")
 LIST(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake") 
 MESSAGE ( "AFTER CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}") 
 
-FIND_PACKAGE ( Boost )
+FIND_PACKAGE ( Boost COMPONENTS python)
 FIND_PACKAGE ( TBB )
 FIND_PACKAGE ( ILMBase ) 
 FIND_PACKAGE ( OpenEXR ) 
@@ -37,6 +37,9 @@ IF (WIN32)
 	)
   LINK_DIRECTORIES ( ${TBB_LIBRARY_DIR} ) # TBB header has implicit linkage
 ELSE ()
+  IF (NOT APPLE)
+    SET ( XRANDR_LIBRARY Xrandr)
+  ENDIF ()
   ADD_DEFINITIONS (
 	-pthread
 	)
@@ -85,7 +88,7 @@ ELSE ()
 	${OPENGL_gl_LIBRARY}
 	${OPENGL_glu_LIBRARY}
 	${GLFW_glfw_LIBRARY}
-	Xrandr
+	${XRANDR_LIBRARY}
 	)
 ENDIF ()
 
@@ -102,6 +105,17 @@ ADD_LIBRARY ( pyopenvdb SHARED
   python/pyOpenVDBModule.cc
   python/pyTransform.cc
   python/pyVec3Grid.cc
+  )
+
+TARGET_LINK_LIBRARIES ( pyopenvdb
+  ${Tbb_TBB_LIBRARY}
+  ${Boost_LIBRARIES}
+  ${PYTHON_LIBRARY}
+  ${Ilmbase_HALF_LIBRARY}
+  openvdb
+  # Ilmbase_IEX_LIBRARY
+  # Ilmbase_ILMTHREAD_LIBRARY
+  # Ilmbase_IMATH_LIBRARY   
   )
 
 SET_TARGET_PROPERTIES ( pyopenvdb

@@ -12,3 +12,10 @@ ADD_LIBRARY ( pyopenvdb SHARED
   python/pyVec3Grid.cc
   )
 
+TARGET_LINK_LIBRARIES ( pyopenvdb
+  ${Tbb_TBB_LIBRARY}
+  ${Boost_LIBRARIES}
+  ${PYTHON_LIBRARY}
+  openvdb
+  # ${APPLICATIONS_DEPENDENT_LIBRARIES}
+  )
