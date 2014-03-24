@@ -17,7 +17,9 @@ FIND_PACKAGE ( OpenGL )
 FIND_PACKAGE ( ZLIB )
 FIND_PACKAGE ( GLEW )
 FIND_PACKAGE ( PythonLibs )
+FIND_PACKAGE ( PythonInterp )
 FIND_PACKAGE ( CPPUnit )
+FIND_PACKAGE ( Doxygen )
 
 INCLUDE_DIRECTORIES ( ${Boost_INCLUDE_DIR} )
 INCLUDE_DIRECTORIES ( ${ILMBASE_INCLUDE_DIRS} )
@@ -113,14 +115,12 @@ TARGET_LINK_LIBRARIES ( pyopenvdb
   ${PYTHON_LIBRARY}
   ${Ilmbase_HALF_LIBRARY}
   openvdb
-  # Ilmbase_IEX_LIBRARY
-  # Ilmbase_ILMTHREAD_LIBRARY
-  # Ilmbase_IMATH_LIBRARY   
   )
 
 SET_TARGET_PROPERTIES ( pyopenvdb
   PROPERTIES
   COMPILE_FLAGS -DPY_OPENVDB_USE_NUMPY
+  PREFIX ""
   )
 
 # Executables
@@ -323,3 +323,26 @@ INSTALL ( FILES
   DESTINATION
   include/openvdb/util
 )
+
+# Python
+INSTALL ( TARGETS
+  pyopenvdb
+  DESTINATION
+  python/lib/python${PYTHON_VERSION_MAJOR}.${PYTHON_VERSION_MINOR}
+  )
+INSTALL ( FILES
+  ./python/pyopenvdb.h
+  DESTINATION
+  python/include/python${PYTHON_VERSION_MAJOR}.${PYTHON_VERSION_MINOR}
+  )
+
+# Doxygen
+# share/doc/openvdb/html
+# echo 'OUTPUT_DIRECTORY=./doc' | cat doxygen-config - | doxygen -
+# cp -r doc/html share/doc/openvdb
+EXECUTE_PROCESS ( COMMAND "echo 'OUTPUT_DIRECTORY=./doc' | cat doxygen-config - | ${DOXYGEN_EXECUTABLE} -")
+INSTALL ( DIRECTORY
+  doc/html
+  DESTINATION
+  share/doc/openvdb
+  )
