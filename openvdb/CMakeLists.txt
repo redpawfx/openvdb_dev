@@ -1,21 +1,33 @@
+# yue.nicholas@gmail.com
+#
 CMAKE_MINIMUM_REQUIRED ( VERSION 2.8 )
 
 PROJECT ( OpenVDB )
 
+MESSAGE ( "BEFORE CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}") 
+LIST(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake") 
+MESSAGE ( "AFTER CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}") 
+
 FIND_PACKAGE ( Boost )
 FIND_PACKAGE ( TBB )
 FIND_PACKAGE ( ILMBase ) 
+FIND_PACKAGE ( OpenEXR ) 
 FIND_PACKAGE ( GLFW )
 FIND_PACKAGE ( OpenGL )
 FIND_PACKAGE ( ZLIB )
 FIND_PACKAGE ( GLEW )
+FIND_PACKAGE ( PythonLibs )
+FIND_PACKAGE ( CPPUnit )
 
 INCLUDE_DIRECTORIES ( ${Boost_INCLUDE_DIR} )
 INCLUDE_DIRECTORIES ( ${ILMBASE_INCLUDE_DIRS} )
+INCLUDE_DIRECTORIES ( ${OPENEXR_INCLUDE_DIRS} )
 INCLUDE_DIRECTORIES ( ${TBB_INCLUDE_DIR} )
 INCLUDE_DIRECTORIES ( ${GLFW_INCLUDE_DIR} )
 INCLUDE_DIRECTORIES ( ${GLEW_INCLUDE_DIR} )
 INCLUDE_DIRECTORIES ( ${CMAKE_SOURCE_DIR}/.. )
+INCLUDE_DIRECTORIES ( ${PYTHON_INCLUDE_DIR} )
+INCLUDE_DIRECTORIES ( ${NUMPY_INCL_DIR} )
 INCLUDE_DIRECTORIES ( . )
 
 IF (WIN32)
@@ -36,6 +48,7 @@ ADD_LIBRARY ( openvdb SHARED
   ./io/Compression.cc
   ./io/File.cc
   ./io/GridDescriptor.cc
+  ./io/Queue.cc
   ./io/Stream.cc
   ./math/Hermite.cc
   ./math/Maps.cc
@@ -72,6 +85,7 @@ ELSE ()
 	${OPENGL_gl_LIBRARY}
 	${OPENGL_glu_LIBRARY}
 	${GLFW_glfw_LIBRARY}
+	Xrandr
 	)
 ENDIF ()
 
@@ -80,13 +94,99 @@ SET_TARGET_PROPERTIES ( openvdb
   COMPILE_FLAGS -DOPENVDB_PRIVATE
   )
 
+# Python interface
+ADD_LIBRARY ( pyopenvdb SHARED
+  python/pyFloatGrid.cc
+  python/pyIntGrid.cc
+  python/pyMetadata.cc
+  python/pyOpenVDBModule.cc
+  python/pyTransform.cc
+  python/pyVec3Grid.cc
+  )
+
+SET_TARGET_PROPERTIES ( pyopenvdb
+  PROPERTIES
+  COMPILE_FLAGS -DPY_OPENVDB_USE_NUMPY
+  )
+
+# Executables
+
 ADD_EXECUTABLE ( vdb_print
   cmd/openvdb_print/main.cc
+)
+
+ADD_EXECUTABLE ( vdb_render
+  cmd/openvdb_render/main.cc 
 )
 
 ADD_EXECUTABLE ( vdb_view
   cmd/openvdb_view/main.cc
 )
+
+ADD_EXECUTABLE ( vdb_test
+  unittest/main.cc
+  unittest/TestBBox.cc
+  unittest/TestCoord.cc
+  unittest/TestCpt.cc
+  unittest/TestCurl.cc
+  unittest/TestDense.cc
+  unittest/TestDivergence.cc
+  unittest/TestDoubleMetadata.cc
+  unittest/TestExceptions.cc
+  unittest/TestFile.cc
+  unittest/TestFloatMetadata.cc
+  unittest/TestGradient.cc
+  unittest/TestGridBbox.cc
+  unittest/TestGrid.cc
+  unittest/TestGridDescriptor.cc
+  unittest/TestGridIO.cc
+  unittest/TestGridTransformer.cc
+  unittest/TestHermite.cc
+  unittest/TestInit.cc
+  unittest/TestInt32Metadata.cc
+  unittest/TestInt64Metadata.cc
+  unittest/TestInternalOrigin.cc
+  unittest/TestLaplacian.cc
+  unittest/TestLeafBool.cc
+  unittest/TestLeaf.cc
+  unittest/TestLeafIO.cc
+  unittest/TestLeafOrigin.cc
+  unittest/TestLevelSetRayIntersector.cc
+  unittest/TestLevelSetUtil.cc
+  unittest/TestLinearInterp.cc
+  unittest/TestMaps.cc
+  unittest/TestMat4Metadata.cc
+  unittest/TestMath.cc
+  unittest/TestMeanCurvature.cc
+  unittest/TestMeshToVolume.cc
+  unittest/TestMetadata.cc
+  unittest/TestMetadataIO.cc
+  unittest/TestMetaMap.cc
+  unittest/TestName.cc
+  unittest/TestNodeIterator.cc
+  unittest/TestNodeMask.cc
+  unittest/TestParticlesToLevelSet.cc
+  unittest/TestPrePostAPI.cc
+  unittest/TestQuadraticInterp.cc
+  unittest/TestQuantizedUnitVec.cc
+  unittest/TestQuat.cc
+  unittest/TestRay.cc
+  unittest/TestStats.cc
+  unittest/TestStream.cc
+  unittest/TestStringMetadata.cc
+  unittest/TestTools.cc
+  unittest/TestTransform.cc
+  unittest/TestTree.cc
+  unittest/TestTreeCombine.cc
+  unittest/TestTreeGetSetValues.cc
+  unittest/TestTreeIterators.cc
+  unittest/TestTreeVisitor.cc
+  unittest/TestValueAccessor.cc
+  unittest/TestVec2Metadata.cc
+  unittest/TestVec3Metadata.cc
+  unittest/TestVolumeRayIntersector.cc
+  unittest/TestVolumeToMesh.cc
+  )
 
 SET_TARGET_PROPERTIES ( vdb_view
   PROPERTIES
@@ -108,12 +208,24 @@ TARGET_LINK_LIBRARIES ( vdb_print
   ${OPENGL_glu_LIBRARY}
   )
 
+TARGET_LINK_LIBRARIES ( vdb_render
+  ${APPLICATIONS_DEPENDENT_LIBRARIES}
+  ${GLEW_GLEW_LIBRARY}
+  ${Openexr_ILMIMF_LIBRARY}
+  )
+
 TARGET_LINK_LIBRARIES ( vdb_view
   ${APPLICATIONS_DEPENDENT_LIBRARIES}
   ${GLFW_glfw_LIBRARY}
   ${GLEW_GLEW_LIBRARY}
   ${OPENGL_gl_LIBRARY}
   ${OPENGL_glu_LIBRARY}
+  )
+
+TARGET_LINK_LIBRARIES ( vdb_test
+  ${APPLICATIONS_DEPENDENT_LIBRARIES}
+  ${GLEW_GLEW_LIBRARY}
+  ${CPPUNIT_cppunit_LIBRARY}
   )
 
 ##################
@@ -124,6 +236,7 @@ TARGET_LINK_LIBRARIES ( vdb_view
 
 INSTALL ( TARGETS
   vdb_print
+  vdb_render
   vdb_view
   DESTINATION
   bin
