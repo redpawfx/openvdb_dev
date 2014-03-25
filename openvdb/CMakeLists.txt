@@ -123,6 +123,13 @@ SET_TARGET_PROPERTIES ( pyopenvdb
   PREFIX ""
   )
 
+IF (APPLE)
+SET_TARGET_PROPERTIES ( pyopenvdb
+  PROPERTIES
+  SUFFIX ".so"
+  )
+ENDIF ()
+
 # Executables
 
 ADD_EXECUTABLE ( vdb_print
@@ -340,9 +347,9 @@ INSTALL ( FILES
 # share/doc/openvdb/html
 # echo 'OUTPUT_DIRECTORY=./doc' | cat doxygen-config - | doxygen -
 # cp -r doc/html share/doc/openvdb
-EXECUTE_PROCESS ( COMMAND "echo 'OUTPUT_DIRECTORY=./doc' | cat doxygen-config - | ${DOXYGEN_EXECUTABLE} -")
-INSTALL ( DIRECTORY
-  doc/html
-  DESTINATION
-  share/doc/openvdb
-  )
+# EXECUTE_PROCESS ( COMMAND "echo 'OUTPUT_DIRECTORY=./doc' | cat doxygen-config - | ${DOXYGEN_EXECUTABLE} -")
+# INSTALL ( DIRECTORY
+#  doc/html
+#  DESTINATION
+#  share/doc/openvdb
+#  )
