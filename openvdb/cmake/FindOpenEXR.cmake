@@ -6,8 +6,8 @@
 #  OPENEXR_FOUND - true if OPENEXR was found on the system
 #  OPENEXR_LIBRARY_DIRS - the full set of library directories
 
-FIND_PATH ( OPENEXR_LOCATION include/OpenEXR/OpenEXRConfig.h
-  ENV OPENEXR_ROOT
+FIND_PATH ( OPENEXR_LOCATION include/OpenEXR/ImfHeader.h
+  "$ENV{OPENEXR_ROOT}"
   NO_DEFAULT_PATH
   NO_SYSTEM_ENVIRONMENT_PATH
   )
