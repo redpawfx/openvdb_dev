@@ -51,7 +51,7 @@
 #include <log4cplus/configurator.h>
 #endif
 #ifdef _WIN32
-#include <openvdb/port/getopt.c>
+#include <port/getopt.c>
 #else
 #include <unistd.h> // for getopt(), optarg
 #endif
