@@ -32,7 +32,7 @@
 ///
 /// @author FX R&D OpenVDB team
 ///
-/// @brief Masks the occluded regions behind objects in the camera frustum 
+/// @brief Masks the occluded regions behind objects in the camera frustum
 
 #include <houdini_utils/ParmFactory.h>
 #include <openvdb_houdini/Utils.h>
@@ -111,7 +111,6 @@ newSopOperator(OP_OperatorTable* table)
         .setDefault(PRMzeroDefaults));
 
     hvdb::OpenVDBOpFactory("OpenVDB Occlusion Mask", SOP_OpenVDB_Occlusion_Mask::factory, parms, *table)
-        .addAlias("OpenVDB Camera Shadow")
         .addInput("VDBs");
 }
 
@@ -135,7 +134,7 @@ SOP_OpenVDB_Occlusion_Mask::SOP_OpenVDB_Occlusion_Mask(OP_Network* net,
 }
 
 OP_ERROR
-SOP_OpenVDB_Occlusion_Mask::cookMyGuide1(OP_Context& context)
+SOP_OpenVDB_Occlusion_Mask::cookMyGuide1(OP_Context&)
 {
     myGuide1->clearAndDestroy();
     if (mFrustum) {
@@ -284,7 +283,7 @@ struct ConstructShadow
             if (openvdb::GRID_LEVEL_SET == grid.getGridClass()) {
 
                 openvdb::BoolGrid::Ptr tmpGrid = openvdb::tools::sdfInteriorMask(grid);
-                
+
                 topologyMask.tree().merge(tmpGrid->tree());
 
                 if (mErode > 3) {
