@@ -84,7 +84,7 @@ HDSO := /Volumes/luma/_globalSoft/applications/houdini-13.0.237/dsolib
 
 
 # The directory into which to install libraries, executables and header files
-INSTALL_DIR := ../RELEASE/OpenVDB-2.2.0
+INSTALL_DIR := ../RELEASE/OpenVDB-2.3.0
 
 # The parent directory of the boost/ header directory
 BOOST_INCL_DIR := $(HT)/include
@@ -124,18 +124,20 @@ CPPUNIT_LIB := -lcppunit
 
 # The parent directory of the log4cplus/ header directory
 # (leave blank if log4cplus is unavailable)
-LOG4CPLUS_INCL_DIR := /rel/folio/log4cplus/log4cplus-1.0.3-latest/sys_include
+LOG4CPLUS_INCL_DIR := /usr/include 
 # The directory containing liblog4cplus
-LOG4CPLUS_LIB_DIR := /rel/folio/log4cplus/log4cplus-1.0.3-latest/library
+LOG4CPLUS_LIB_DIR := /usr/lib64
 LOG4CPLUS_LIB := -llog4cplus
 
 # The directory containing glfw.h
 # (leave blank if GLFW is unavailable)
-#GLFW_INCL_DIR := /usr/include/GL
-GLFW_INCL_DIR := /Volumes/sv-dev01/devRepo/johnc/3rdParty/github/redpawFX/openvdb_dev/glfw-2.7.9/BUILD/include
+GLFW_INCL_DIR :=
+#GLFW_INCL_DIR := /Volumes/sv-dev01/devRepo/johnc/3rdParty/github/redpawFX/openvdb_dev/glfw-2.7.9/BUILD/include
 # The directory containing libglfw
-GLFW_LIB_DIR := /Volumes/sv-dev01/devRepo/johnc/3rdParty/github/redpawFX/openvdb_dev/glfw-2.7.9/BUILD/lib
-GLFW_LIB := -lglfw
+GLFW_LIB_DIR :=
+#GLFW_LIB_DIR := /Volumes/sv-dev01/devRepo/johnc/3rdParty/github/redpawFX/openvdb_dev/glfw-2.7.9/BUILD/lib
+GLFW_LIB :=
+#GLFW_LIB := -lglfw
 
 # The version of Python for which to build the OpenVDB module
 # (leave blank if Python is unavailable)
