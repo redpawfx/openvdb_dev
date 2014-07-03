@@ -38,6 +38,8 @@
 #include <maya/MFnStringData.h>
 #include <maya/MFnPluginData.h>
 #include <maya/MFnNumericAttribute.h>
+#include <maya/MFnUnitAttribute.h>
+#include <maya/MStringArray.h>
 
 
 namespace mvdb = openvdb_maya;
@@ -55,7 +57,9 @@ struct OpenVDBReadNode : public MPxNode
 
     static void* creator();
     static MStatus initialize();
+	bool vdbCacheExists(const char* fileName);
     static MObject aVdbFilePath;
+	static MObject aInTime;
     static MObject aVdbOutput;
     static MTypeId id;
 };
@@ -63,7 +67,9 @@ struct OpenVDBReadNode : public MPxNode
 
 MTypeId OpenVDBReadNode::id(0x00108A51);
 MObject OpenVDBReadNode::aVdbFilePath;
+MObject OpenVDBReadNode::aInTime;
 MObject OpenVDBReadNode::aVdbOutput;
+
 
 
 namespace {
@@ -75,6 +81,28 @@ namespace {
 ////////////////////////////////////////
 
 
+//////////////////////////////////////////////////
+bool OpenVDBReadNode::vdbCacheExists(const char* fileName)
+{
+
+    struct stat fileInfo;
+    bool statReturn;
+    int intStat;
+
+    intStat = stat(fileName, &fileInfo);
+    if (intStat == 0)
+    {
+        statReturn = true;
+    }
+    else
+    {
+        statReturn = false;
+    }
+
+    return(statReturn);
+
+}
+
 void* OpenVDBReadNode::creator()
 {
         return new OpenVDBReadNode();
@@ -85,6 +113,7 @@ MStatus OpenVDBReadNode::initialize()
 {
     MStatus stat;
     MFnTypedAttribute tAttr;
+	MFnNumericAttribute nAttr;
 
     MFnStringData fnStringData;
     MObject defaultStringData = fnStringData.create("");
@@ -98,6 +127,12 @@ MStatus OpenVDBReadNode::initialize()
     stat = addAttribute(aVdbFilePath);
     if (stat != MS::kSuccess) return stat;
 
+	aInTime = nAttr.create( "time", "tm", MFnNumericData::kLong ,0);
+    nAttr.setKeyable( true );
+	nAttr.setConnectable(true);
+	stat = addAttribute(aInTime);
+	if (stat != MS::kSuccess) return stat;
+	
     // Setup the output attributes
 
     aVdbOutput = tAttr.create("VdbOutput", "vdb", OpenVDBData::id, MObject::kNullObj, &stat);
@@ -112,6 +147,8 @@ MStatus OpenVDBReadNode::initialize()
     // Set the attribute dependencies
 
     stat = attributeAffects(aVdbFilePath, aVdbOutput);
+    if (stat != MS::kSuccess) return stat;
+	stat = attributeAffects(aInTime, aVdbOutput);
     if (stat != MS::kSuccess) return stat;
 
     return MS::kSuccess;
@@ -129,7 +166,61 @@ MStatus OpenVDBReadNode::compute(const MPlug& plug, MDataBlock& data)
         MDataHandle filePathHandle = data.inputValue (aVdbFilePath, &status);
         if (status != MS::kSuccess) return status;
 
-        std::ifstream ifile(filePathHandle.asString().asChar(), std::ios_base::binary);
+		int integerTime	= data.inputValue(aInTime).asInt();
+
+		MString filePath = filePathHandle.asString();
+		MString filePathParsed = "";
+
+		MStringArray outFileParts;
+		filePath.split('.',outFileParts);
+		MString frameNum;
+		MString formatString = "%0";
+
+		if (outFileParts.length() > 2) 
+		{
+			if (outFileParts[outFileParts.length()-1] == "vdb") 
+			{
+				// making assumptions
+				frameNum = outFileParts[outFileParts.length()-2];
+				if (frameNum.substring(0,1) == "$F")
+				{
+					MString pad = "1";
+					if(frameNum.length() > 2)
+					{
+						pad = frameNum.substring(2,frameNum.length()-1);
+					}
+					formatString += pad;
+					formatString += "d";
+					const char* fmt = formatString.asChar();
+					char frameString[10];
+					sprintf(frameString, fmt , integerTime);
+					outFileParts[outFileParts.length()-2] = frameString;
+				}
+			}
+			else
+			{
+				return data.setClean(plug);
+			}
+
+			for (uint x = 0; x < outFileParts.length()-1; x++)
+			{
+				filePathParsed += outFileParts[x]+".";
+			}
+			filePathParsed += outFileParts[outFileParts.length()-1];
+			
+		}
+		else
+		{
+			filePathParsed = filePath;
+		}
+
+		std::cout << filePathParsed << std::endl;
+		if(!vdbCacheExists(filePathParsed.asChar()))
+		{
+			return data.setClean(plug);
+		}
+
+        std::ifstream ifile(filePathParsed.asChar(), std::ios_base::binary);
         openvdb::GridPtrVecPtr grids = openvdb::io::Stream(ifile).getGrids();
 
         if (!grids->empty()) {
