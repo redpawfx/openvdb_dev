@@ -1,3 +1,5 @@
 /glfw-2.7.9/
 *.kdev4
 /BUILD/
+/_old/
+/RELEASE/
