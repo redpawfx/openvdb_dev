@@ -79,9 +79,9 @@ INSTALL_DIR := /Volumes/sv-dev01/devRepo/johnc/3rdParty/github/redpawFX/openvdb_
 HOUDINI_INSTALL_DIR := $(INSTALL_DIR)/houdini/dso
 
 # The parent directory of the openvdb/ header directory
-OPENVDB_INCL_DIR := $(INSTALL_DIR)/OpenVDB-2.2.0/include
+OPENVDB_INCL_DIR := $(INSTALL_DIR)/OpenVDB-2.3.0/include
 # The directory containing libopenvdb
-OPENVDB_LIB_DIR := $(INSTALL_DIR)/OpenVDB-2.2.0/lib
+OPENVDB_LIB_DIR := $(INSTALL_DIR)/OpenVDB-2.3.0/lib
 OPENVDB_LIB := -lopenvdb
 
 # The parent directory of the boost/ header directory

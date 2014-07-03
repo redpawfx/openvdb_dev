@@ -52,6 +52,10 @@ ifeq (,$(MAYA_LOCATION))
 $(warning Warning: $$(MAYA_LOCATION) is not set)
 endif
 
+# we use  HOUDINI's  boost and openEXR 
+## hardcoding  path to houdini here because  kdevelop doesn't like  some of the libs  within setpkg 
+HT := /Volumes/luma/_globalSoft/applications/houdini-13.0.237/toolkit
+HDSO := /Volumes/luma/_globalSoft/applications/houdini-13.0.237/dsolib
 
 # The directory into which to install libraries and header files
 # (it is recommended that this match the INSTALL_DIR in the OpenVDB
@@ -62,18 +66,18 @@ INSTALL_DIR := /Volumes/sv-dev01/devRepo/johnc/3rdParty/github/redpawFX/openvdb_
 MAYA_INSTALL_DIR := $(INSTALL_DIR)/maya
 
 # The parent directory of the openvdb/ header directory
-OPENVDB_INCL_DIR := $(INSTALL_DIR)/OpenVDB-2.2.0/include
+OPENVDB_INCL_DIR := $(INSTALL_DIR)/OpenVDB-2.3.0/include
 # The directory containing libopenvdb
-OPENVDB_LIB_DIR := $(INSTALL_DIR)/OpenVDB-2.2.0/lib
+OPENVDB_LIB_DIR := $(INSTALL_DIR)/OpenVDB-2.3.0/lib
 OPENVDB_LIB := -lopenvdb
 
 # The parent directory of the boost/ header directory
-BOOST_INCL_DIR :=
+BOOST_INCL_DIR := $(HT)/include
 
 # The parent directory of the OpenEXR/ header directory (which contains half.h)
-HALF_INCL_DIR :=
+HALF_INCL_DIR := $(HT)/include
 # The directory containing libHalf
-HALF_LIB_DIR :=
+HALF_LIB_DIR := $(HDSO)
 HALF_LIB := -lHalf
 
 # The parent directory of the tbb/ header directory

@@ -1,0 +1,4 @@
+*.so
+*.o
+/maya_deps
+/openvdb_maya
