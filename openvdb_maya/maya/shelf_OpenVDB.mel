@@ -189,7 +189,7 @@ global proc shelf_OpenVDB () {
         -style "iconOnly" 
         -marginWidth 1
         -marginHeight 1
-        -command "catch(`loadPlugin \"OpenVDB\"`); \nstring $node = `createNode  OpenVDBFromFluid-n \"VDB_FromFluid#\"`;\n" 
+        -command "catch(`loadPlugin \"OpenVDB\"`); \nstring $node = `createNode  OpenVDBFromMayaFluid-n \"VDB_FromFluid#\"`;\nconnectAttr  \"time1.outTime\"  ($node+\".CurrentTime\");\n" 
         -sourceType "mel" 
         -commandRepeatable 1
         -flat 1
