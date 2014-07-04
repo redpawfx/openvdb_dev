@@ -40,6 +40,7 @@
 #include <maya/MFnNumericAttribute.h>
 #include <maya/MFnUnitAttribute.h>
 #include <maya/MStringArray.h>
+#include <maya/MTime.h>
 
 
 namespace mvdb = openvdb_maya;
@@ -113,7 +114,7 @@ MStatus OpenVDBReadNode::initialize()
 {
     MStatus stat;
     MFnTypedAttribute tAttr;
-	MFnNumericAttribute nAttr;
+	MFnUnitAttribute uAttr;
 
     MFnStringData fnStringData;
     MObject defaultStringData = fnStringData.create("");
@@ -127,9 +128,9 @@ MStatus OpenVDBReadNode::initialize()
     stat = addAttribute(aVdbFilePath);
     if (stat != MS::kSuccess) return stat;
 
-	aInTime = nAttr.create( "time", "tm", MFnNumericData::kLong ,0);
-    nAttr.setKeyable( true );
-	nAttr.setConnectable(true);
+	aInTime = uAttr.create( "time", "tm", MFnUnitAttribute::kTime ,0);
+    uAttr.setKeyable( true );
+	uAttr.setConnectable(true);
 	stat = addAttribute(aInTime);
 	if (stat != MS::kSuccess) return stat;
 	
@@ -166,7 +167,9 @@ MStatus OpenVDBReadNode::compute(const MPlug& plug, MDataBlock& data)
         MDataHandle filePathHandle = data.inputValue (aVdbFilePath, &status);
         if (status != MS::kSuccess) return status;
 
-		int integerTime	= data.inputValue(aInTime).asInt();
+		MTime  inTime	= data.inputValue(aInTime).asTime();
+
+		int integerTime = inTime.value();
 
 		MString filePath = filePathHandle.asString();
 		MString filePathParsed = "";

@@ -1,0 +1,225 @@
+global proc shelf_OpenVDB () {
+    global string $gBuffStr;
+    global string $gBuffStr0;
+    global string $gBuffStr1;
+
+
+    shelfButton
+        -enableCommandRepeat 1
+        -enable 1
+        -width 35
+        -height 35
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "create vdbRead node " 
+        -enableBackground 0
+        -align "center" 
+        -label "VDB read Node" 
+        -labelOffset 0
+        -font "plainLabelFont" 
+        -imageOverlayLabel "Read" 
+        -overlayLabelColor 0.705189 0.702 1 
+        -overlayLabelBackColor 1 1 1 0.1 
+        -image "commandButton.png" 
+        -image1 "commandButton.png" 
+        -style "iconOnly" 
+        -marginWidth 1
+        -marginHeight 1
+        -command "catch(`loadPlugin \"OpenVDB\"`); \nstring $node = `createNode  OpenVDBRead -n \"VDB_Read#\"`;\nconnectAttr  \"time1.outTime\"  ($node+\".time\");" 
+        -sourceType "mel" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -enable 1
+        -width 34
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "create VDB Write node " 
+        -enableBackground 0
+        -align "center" 
+        -label "VDB Write Node" 
+        -labelOffset 0
+        -font "plainLabelFont" 
+        -imageOverlayLabel "Write" 
+        -overlayLabelColor 0.73468 0.6648 0.8 
+        -overlayLabelBackColor 0 0 0 0.2 
+        -image "commandButton.png" 
+        -image1 "commandButton.png" 
+        -style "iconOnly" 
+        -marginWidth 1
+        -marginHeight 1
+        -command "catch(`loadPlugin \"OpenVDB\"`); \nstring $node = `createNode  OpenVDBWrite -n \"VDB_Write#\"`;\n//connectAttr  \"time1.outTime\"  ($node+\".time\");" 
+        -sourceType "mel" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -enable 1
+        -width 35
+        -height 35
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "create VDB Visualizer" 
+        -enableBackground 0
+        -align "center" 
+        -label "VDB Visualize Node " 
+        -labelOffset 0
+        -font "plainLabelFont" 
+        -imageOverlayLabel "Viz" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.2 
+        -image "commandButton.png" 
+        -image1 "commandButton.png" 
+        -style "iconOnly" 
+        -marginWidth 1
+        -marginHeight 1
+        -command "catch(`loadPlugin \"OpenVDB\"`); \nstring $node = `createNode  OpenVDBVisualize -n \"VDB_Visualize#\"`;" 
+        -sourceType "mel" 
+        -commandRepeatable 1
+        -flat 1
+        -mi "Create with Read Node " ( "loadPlugin \"OpenVDB\";\nstring $read = `createNode -n \"VDB_Read#\" OpenVDBRead`;\nstring $node = `createNode -n \"VDB_Visualizer#\" OpenVDBVisualize`;\nconnectAttr time1.outTime ($read+\".time\");\nconnectAttr -f ($read + \".VdbOutput\") ($node+\".VDBInput\");" )
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -enable 1
+        -width 35
+        -height 35
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "create VDB from selected Polygon" 
+        -enableBackground 0
+        -align "center" 
+        -label "VDB from Polygons" 
+        -labelOffset 0
+        -font "plainLabelFont" 
+        -imageOverlayLabel "Poly" 
+        -overlayLabelColor 1 0.402985 0 
+        -overlayLabelBackColor 0 0 0 0.2 
+        -image "commandButton.png" 
+        -image1 "commandButton.png" 
+        -style "iconOnly" 
+        -marginWidth 1
+        -marginHeight 1
+        -command "string $sel[] = `ls -sl`;\nstring $shp = $sel[0];\nif (`nodeType $shp` == \"transform\")\n{\n    string $shape[]= `listRelatives -s $shp`;\n    $shp = $shape[0];\n}\nif(`nodeType $shp` == \"mesh\")\n{\n    loadPlugin \"OpenVDB\";\n    string $vdbPoly = `createNode -n \"VDB_FromPoly#\" OpenVDBFromPolygons`;\n    connectAttr -force ($shp+\".worldMesh\") ($vdbPoly+\".MeshInput\");\n}" 
+        -sourceType "mel" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -enable 1
+        -width 34
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "Create VDB Filter node " 
+        -enableBackground 0
+        -align "center" 
+        -label "VDB Filter" 
+        -labelOffset 0
+        -font "plainLabelFont" 
+        -imageOverlayLabel "Filt" 
+        -overlayLabelColor 0.40953 0.803 0.622827 
+        -overlayLabelBackColor 0 0 0 0.2 
+        -image "commandButton.png" 
+        -image1 "commandButton.png" 
+        -style "iconOnly" 
+        -marginWidth 1
+        -marginHeight 1
+        -command "catch(`loadPlugin \"OpenVDB\"`); \nstring $node = `createNode  OpenVDBFilter-n \"VDB_Filter#\"`;\n" 
+        -sourceType "mel" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -enable 1
+        -width 34
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "Create VDB  copy node" 
+        -enableBackground 0
+        -align "center" 
+        -label "VDB Copy" 
+        -labelOffset 0
+        -font "plainLabelFont" 
+        -imageOverlayLabel "Copy" 
+        -overlayLabelColor 0 1 1 
+        -overlayLabelBackColor 0 0 0 0.2 
+        -image "commandButton.png" 
+        -image1 "commandButton.png" 
+        -style "iconOnly" 
+        -marginWidth 1
+        -marginHeight 1
+        -command "catch(`loadPlugin \"OpenVDB\"`); \nstring $node = `createNode  OpenVDBCopy -n \"VDB_Copy#\"`;\n" 
+        -sourceType "mel" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -enable 1
+        -width 34
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "create VDB from Fluid node " 
+        -enableBackground 0
+        -align "center" 
+        -label "VDB from Fluid" 
+        -labelOffset 0
+        -font "plainLabelFont" 
+        -imageOverlayLabel "Fluid" 
+        -overlayLabelColor 0 1 0.0224667 
+        -overlayLabelBackColor 0 0 0 0.2 
+        -image "commandButton.png" 
+        -image1 "commandButton.png" 
+        -style "iconOnly" 
+        -marginWidth 1
+        -marginHeight 1
+        -command "catch(`loadPlugin \"OpenVDB\"`); \nstring $node = `createNode  OpenVDBFromFluid-n \"VDB_FromFluid#\"`;\n" 
+        -sourceType "mel" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -enable 1
+        -width 34
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "Create VDB Transform node" 
+        -enableBackground 0
+        -align "center" 
+        -label "VDB Transform" 
+        -labelOffset 0
+        -font "plainLabelFont" 
+        -imageOverlayLabel "Xform" 
+        -overlayLabelColor 1 1 0 
+        -overlayLabelBackColor 0 0 0 0.2 
+        -image "commandButton.png" 
+        -image1 "commandButton.png" 
+        -style "iconOnly" 
+        -marginWidth 1
+        -marginHeight 1
+        -command "catch(`loadPlugin \"OpenVDB\"`); \nstring $node = `createNode  OpenVDBTransform -n \"VDB_Xform#\"`;\n" 
+        -sourceType "mel" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+
+} 
